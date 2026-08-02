@@ -4,7 +4,7 @@
 **作者**：Jason Pan (Senior Cloud & AI Solutions Architect)  
 **版本**：v1.1.0 (Updated: Deterministic & Golden Dataset Evaluation Engine)  
 **状态**：Draft for Hands-On Implementation  
-**目标平台**：GCP Compute Engine (VM), PostgreSQL, Redis  
+**目标平台**：GCP Compute Engine (VM), OCI MySQL HeatWave Always Free (`rin-heatwave`), Redis  
 
 ---
 
@@ -20,7 +20,7 @@
 ### 1.2 项目目标 (Goals)
 `my-litellm-service` 旨在在 **GCP Compute Engine** 上搭建一套轻量级、企业级的高可用大模型统一网关与评测中间件：
 * 统一屏蔽底层 LLM 差异，暴露标准的 **OpenAI 兼容 API**。
-* 实现 **PostgreSQL 审计日志**，精准记录每次请求的 Prompt/Completion Tokens 及 USD 扣费。
+* 实现 **OCI MySQL 审计日志**，精准异步记录每次请求的 Prompt/Completion Tokens 及 USD 扣费（持久化保存于 OCI 永久免费托管数据库 `rin-heatwave`，防止 GCP 算力被回收导致数据丢失）。
 * 基于 **Redis** 提供 sub-millisecond 级别的速率限制（Rate Limiting）与语义/精确缓存（Caching）。
 * 基于 **确定性断言 (Option A) 与 黄金数据集比对 (Option B)** 提供客观、微秒级、零额外 API 成本的大模型综合性能（Accuracy, Latency, Cost）评测引擎。
 
@@ -60,13 +60,13 @@
 1. **Process A: LiteLLM Proxy (Port 4000)**
    * 作为核心 LLM 网关，处理协议转换、模型负载均衡与 Failover 路由。
    * 内置 Admin UI 界面，提供模型 Key 管理与配置查看。
-   * 通过内置 Hook 将请求耗时、Token 数及美元开销实时写入 PostgreSQL 与 Redis。
+   * 通过内置 Hook 将请求耗时、Token 数及美元开销异步写入 OCI MySQL 与 Redis。
 2. **Process B: FastAPI Application (Port 8000)**
    * 提供应用层 API、自定义 Benchmark 触发接口及成本统计报表导出。
    * 集成 **方案 A (JSON Schema / Code / Regex)** 与 **方案 B (Golden Answer Matching)** 本地评估引擎。
    * 对外暴露 `/v1/eval/run`、`/v1/metrics/spend` 及健康检查 `/health` 接口。
 3. **Data & Storage Layer**
-   * **PostgreSQL (15+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`）。
+   * **OCI MySQL HeatWave (9.7+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`），避免数据随 GCP 计算节点被回收。
    * **Redis (7+)**：处理并发 API 速率限制、Token 临时 Bucket 计数以及常见 Prompt 的缓存响应。
 
 ---
@@ -107,9 +107,9 @@
 ## 4. 数据库 Schema 设计 (Database Schema)
 
 ```sql
--- 1. 核心请求与费用日志表
+-- 1. 核心请求与费用日志表 (MySQL 9.7 / OCI HeatWave)
 CREATE TABLE IF NOT EXISTS llm_request_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id VARCHAR(36) PRIMARY KEY,
     request_id VARCHAR(128) NOT NULL,
     api_key_alias VARCHAR(64) DEFAULT 'default',
     model_requested VARCHAR(64) NOT NULL,
@@ -117,30 +117,28 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
     prompt_tokens INT NOT NULL DEFAULT 0,
     completion_tokens INT NOT NULL DEFAULT 0,
     total_tokens INT NOT NULL DEFAULT 0,
-    cost_usd NUMERIC(10, 6) NOT NULL DEFAULT 0.000000,
+    cost_usd DECIMAL(10, 6) NOT NULL DEFAULT 0.000000,
     latency_ms INT NOT NULL,
     status_code INT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_logs_created_at ON llm_request_logs(created_at);
-CREATE INDEX idx_logs_model ON llm_request_logs(model_used);
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_logs_created_at (created_at),
+    INDEX idx_logs_model (model_used)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 2. 大模型评测记录表 (Option A + Option B 评测结果)
 CREATE TABLE IF NOT EXISTS eval_benchmarks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id VARCHAR(36) PRIMARY KEY,
     eval_run_id VARCHAR(64) NOT NULL,
     prompt_name VARCHAR(128) NOT NULL,
     model_name VARCHAR(64) NOT NULL,
     eval_type VARCHAR(32) NOT NULL, -- json_schema, exact_match, code_exec, similarity
     response_content TEXT,
     latency_ms INT NOT NULL,
-    cost_usd NUMERIC(10, 6) NOT NULL,
-    accuracy_score NUMERIC(5, 2), -- 0.00 ~ 100.00
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_eval_run_id ON eval_benchmarks(eval_run_id);
+    cost_usd DECIMAL(10, 6) NOT NULL,
+    accuracy_score DECIMAL(5, 2), -- 0.00 ~ 100.00
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_eval_run_id (eval_run_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 ---
@@ -152,12 +150,12 @@ CREATE INDEX idx_eval_run_id ON eval_benchmarks(eval_run_id);
 GCP_PROJECT_ID=your-gcp-project-id
 GCP_REGION=us-central1
 
-# Database & Cache Connection
-POSTGRES_USER=litellm_user
-POSTGRES_PASSWORD=litellm_password
-POSTGRES_DB=litellm_db
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+# OCI MySQL Database Connection (rin-heatwave)
+MYSQL_USER=admin_user
+MYSQL_PASSWORD=your-secure-password
+MYSQL_DB=litellm_db
+MYSQL_HOST=10.0.0.247
+MYSQL_PORT=3306
 
 REDIS_HOST=localhost
 REDIS_PORT=6379
@@ -177,20 +175,20 @@ FASTAPI_PORT=8000
 
 ## 6. 主人实战练习 Roadmap (Hands-On Execution Plan)
 
-### 阶段一：本地基础设施与 LiteLLM 代理启动 (Phase 1)
-- [ ] 启动本地 PostgreSQL 与 Redis 服务。
+### 阶段一：本地/OCI 基础设施与 LiteLLM 代理启动 (Phase 1)
+- [ ] 连通 OCI MySQL (`10.0.0.247:3306`) 与 本地/GCP Redis 服务。
 - [ ] 编写 LiteLLM 配置文件 `config.yaml`，声明 OpenAI、Gemini 及 Claude 的模型路由与 Fallback 机制。
 - [ ] 启动 LiteLLM Proxy 进程，验证 `http://localhost:4000/health` 及 `/v1/chat/completions`。
 
-### 阶段二：PostgreSQL 落库与数据库 Hook (Phase 2)
-- [ ] 执行 SQL DDL 脚本初始化 `llm_request_logs` 与 `eval_benchmarks` 数据表。
-- [ ] 配置 LiteLLM Proxy 连接 PostgreSQL，验证每次 API 调用的 Token 数与 USD 花费成功异步写入数据库。
+### 阶段二：OCI MySQL 落库与数据库 Hook (Phase 2)
+- [ ] 执行 MySQL DDL 脚本初始化 `llm_request_logs` 与 `eval_benchmarks` 数据表。
+- [ ] 配置 LiteLLM Proxy 连接 OCI MySQL，验证每次 API 调用的 Token 数与 USD 花费成功异步写入数据库。
 
 ### 阶段三：FastAPI 中间件与 Eval Engine (方案 A+B) 开发 (Phase 3)
 - [ ] 编写 FastAPI 主程序 `main.py`。
 - [ ] 实现方案 A (JSON Schema / 代码断言) 与 方案 B (Golden Answer 匹配) 本地评估函数。
 - [ ] 实现 `/v1/eval/run` 评测接口：使用 Python 协程并发测试多个模型的响应速度、开销与准确率。
-- [ ] 实现 `/v1/metrics/spend` 接口：读取 PostgreSQL 统计当日与累计的花费账单。
+- [ ] 实现 `/v1/metrics/spend` 接口：读取 OCI MySQL 统计当日与累计的花费账单。
 
 ### 阶段四：GCP Compute Engine 部署与 Systemd 守护 (Phase 4)
 - [ ] 在 GCP Compute Engine 上创建 Ubuntu 22.04 VM 实例。
