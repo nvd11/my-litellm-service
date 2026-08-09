@@ -94,4 +94,4 @@ async def get_spend_metrics(db: AsyncSession = Depends(get_db)):
 ## 4. 风险控制与红线 (Risk Control)
 
 * ⚠️ **异步隔离**：数据库写入故障（如 DB 连通超时）严禁导致 LLM API 请求失败，必须使用 `try-except` 包裹日志回调。
-* ⚠️ **数据精度**：金额必须采用 `NUMERIC(10, 6)` 类型，严禁使用浮点数（`FLOAT`）存储，避免累加浮点精度丢失。
+* ⚠️ **数据精度**：金额必须采用 MySQL `DECIMAL(10, 6)` 类型，严禁使用浮点数（`FLOAT`）存储，避免累加浮点精度丢失。

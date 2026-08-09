@@ -21,7 +21,7 @@
 `my-litellm-service` 旨在在 **GCP Compute Engine** 上搭建一套轻量级、企业级的高可用大模型统一网关与评测中间件：
 * 统一屏蔽底层 LLM 差异，暴露标准的 **OpenAI 兼容 API**。
 * 实现 **OCI MySQL 审计日志**，精准异步记录每次请求的 Prompt/Completion Tokens 及 USD 扣费（持久化保存于 OCI 永久免费托管数据库 `rin-heatwave`，防止 GCP 算力被回收导致数据丢失）。
-* 基于 **Redis** 提供 sub-millisecond 级别的速率限制（Rate Limiting）与语义/精确缓存（Caching）。
+* 复用现有 **K3s Redis**，通过 Tailscale 与 Kong L4 TCP 转发提供速率限制（Rate Limiting）与精确缓存（Caching），不在 GCE VM 新建 Redis。
 * 基于 **确定性断言 (Option A) 与 黄金数据集比对 (Option B)** 提供客观、微秒级、零额外 API 成本的大模型综合性能（Accuracy, Latency, Cost）评测引擎。
 
 ---
@@ -50,9 +50,10 @@
                                   /         |         \
                                  v          v          v
                           +-----------+ +-------+ +----------+
-                          | PostgreSQL| | Redis | | LLM APIs |
-                          |  (Logs/   | |(Rate- | |(OpenAI/  |
-                          |  Budgets) | |Limit) | |Vertex AI)|
+                          | OCI MySQL | | Redis | | LLM APIs |
+                          | HeatWave  | |(Rate- | |(OpenAI/  |
+                          | (Logs/    | |Limit) | |Vertex AI)|
+                          | Budgets)  | |       | |          |
                           +-----------+ +-------+ +----------+
 ```
 
@@ -67,7 +68,7 @@
    * 对外暴露 `/v1/eval/run`、`/v1/metrics/spend` 及健康检查 `/health` 接口。
 3. **Data & Storage Layer**
    * **OCI MySQL HeatWave (9.7+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`），避免数据随 GCP 计算节点被回收。
-   * **Redis (7+)**：处理并发 API 速率限制、Token 临时 Bucket 计数以及常见 Prompt 的缓存响应。
+   * **现有 K3s Redis (7+)**：Redis Pod 固定在 OCI `free-arm-vm`，由 Kong L4 TCP 转发并经 Tailscale 供 GCE VM 访问；处理并发 API 速率限制、Token 临时 Bucket 计数及常见 Prompt 的缓存响应。项目不得新建本地 Redis 实例。
 
 ---
 
@@ -85,7 +86,7 @@
 ### 3.2 费用审计与 Token 计量 (Cost Audit & Token Metering)
 * **精准 Token 统计**：提取 `prompt_tokens`、`completion_tokens` 和 `total_tokens`。
 * **美元花费计算 (USD Cost)**：网关根据模型单价实时计算并记录成本（精确到小数点后 6 位）。
-* **PostgreSQL 日志落库**：异步写入 `llm_request_logs` 表。
+* **OCI MySQL 日志落库**：异步写入 `llm_request_logs` 表。
 
 ### 3.3 评估引擎设计 (Evaluation Engine: Option A + Option B)
 评测引擎放弃昂贵且带偏见的 LLM-as-a-Judge 方案，全面采用 **方案 A + 方案 B** 本地高客观度校验：
@@ -157,8 +158,10 @@ MYSQL_DB=litellm_db
 MYSQL_HOST=10.0.0.247
 MYSQL_PORT=3306
 
-REDIS_HOST=localhost
+# Existing K3s Redis: OCI free-arm-vm, exposed through Kong L4 over Tailscale.
+REDIS_HOST=100.105.130.0
 REDIS_PORT=6379
+REDIS_PASSWORD=load-from-private-env
 
 # LLM Provider API Keys
 OPENAI_API_KEY=sk-proj-...
@@ -175,8 +178,8 @@ FASTAPI_PORT=8000
 
 ## 6. 主人实战练习 Roadmap (Hands-On Execution Plan)
 
-### 阶段一：本地/OCI 基础设施与 LiteLLM 代理启动 (Phase 1)
-- [ ] 连通 OCI MySQL (`10.0.0.247:3306`) 与 本地/GCP Redis 服务。
+### 阶段一：基础设施接入与 LiteLLM 代理启动 (Phase 1)
+- [ ] 将 GCE VM 接入 Tailscale，连通 OCI MySQL (`10.0.0.247:3306`) 与现有 K3s Redis（`100.105.130.0:6379`）；Redis 密码仅从私有 `.env` 读取。
 - [ ] 编写 LiteLLM 配置文件 `config.yaml`，声明 OpenAI、Gemini 及 Claude 的模型路由与 Fallback 机制。
 - [ ] 启动 LiteLLM Proxy 进程，验证 `http://localhost:4000/health` 及 `/v1/chat/completions`。
 

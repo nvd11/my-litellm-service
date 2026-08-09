@@ -25,7 +25,7 @@ graph TB
     Client -->|Eval & Spend API :8000| Process_B
     Process_B -->|Async Concurrent Requests :4000| Router
 
-    RateLimiter <-->|RPM/TPM & Exact Cache| Redis[("Redis 7+\n(Port 6379)")]
+    RateLimiter <-->|Tailscale + Kong L4\nRPM/TPM & Exact Cache| Redis[("Existing K3s Redis 7+\nOCI free-arm-vm, :6379")]
     DBHook -->|Async Cost Insert| MySQL[("OCI MySQL HeatWave 9.7+\nrin-heatwave (10.0.0.247:3306)")]
     MetricsRouter -->|Query Spend Logs| MySQL
 
@@ -79,7 +79,7 @@ graph TB
 | **模块二 (写)** | 开销审计与 Token 计量 (Data Ingestion) | **Process A: LiteLLM Proxy** | 请求完成后异步 Callback 触发，无感写入 OCI MySQL `llm_request_logs` 表。 |
 | **模块二 (读)** | 开销审计与报表 API (Reporting) | **Process B: FastAPI** | 暴露 `GET /v1/metrics/spend` 接口，查询并汇总数据库中的模型耗费与请求报表。 |
 | **模块三** | 本地客观评测引擎 (Eval Harness) | **Process B: FastAPI** | 暴露 `POST /v1/eval/run` 接口，使用 `asyncio` 并发测试多模型，执行 Option A (断言) 与 Option B (黄金匹配) 校验。 |
-| **模块四** | 限流与缓存 (Rate Limit & Cache) | **Process A: LiteLLM Proxy** | 前置集成 Redis 7+，处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存。 |
+| **模块四** | 限流与缓存 (Rate Limit & Cache) | **Process A: LiteLLM Proxy** | 连接现有 K3s Redis 7+（OCI `free-arm-vm` 的 Pod，经 Kong L4 与 Tailscale 访问），处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存；GCE 不部署本地 Redis。 |
 
 ---
 
@@ -137,7 +137,7 @@ sequenceDiagram
 1. **请求接入 (Ingress)**：
    * 客户端向 FastAPI (`:8000/v1/eval/run`) 或直接向 LiteLLM Proxy (`:4000/v1/chat/completions`) 发送符合 OpenAI 规范的 JSON 请求。
 2. **限流与缓存拦截 (Rate Limiting & Caching Check)**：
-   * LiteLLM Proxy 首先在 **Redis** 中检查该 API Key 的当前分钟调用计数（RPM / TPM）。若超限则直接返回 `429 Too Many Requests`。
+   * LiteLLM Proxy 通过 Tailscale 与 Kong L4 连接现有 **K3s Redis**，检查该 API Key 的当前分钟调用计数（RPM / TPM）。若超限则直接返回 `429 Too Many Requests`。
    * 若启用了 Response Cache，匹配 Redis 中相同的 Prompt hash；若命中则直接返回缓存结果。
 3. **模型路由与自动重试 (Routing & Fallback)**：
    * LiteLLM 根据配置路由到指定的底层 API（如 OpenAI `gpt-4o` 或 Vertex AI `gemini-1.5-pro`）。
@@ -157,7 +157,8 @@ sequenceDiagram
 ```ini
 [Unit]
 Description=LiteLLM Proxy Service
-After=network.target postgresql.service redis.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

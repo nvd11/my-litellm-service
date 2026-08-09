@@ -1,6 +1,6 @@
 # 模块四实施计划：限流与缓存 (Rate Limiting & Caching)
 
-> **目标**：在 LiteLLM Proxy 前置集成 Redis 7+ 缓存与限流中间件，实现微秒级 API RPM/TPM 限流拦截与 Exact Prompt 哈希缓存。
+> **目标**：将 LiteLLM Proxy 接入现有 K3s Redis 7+ 缓存与限流中间件，实现低延迟 API RPM/TPM 限流拦截与 Exact Prompt 哈希缓存；不新建 Redis 实例。
 
 ---
 
@@ -18,13 +18,17 @@
 
 ## 2. 详细实施步骤 (Step-by-Step)
 
-### Step 1: Redis 服务本地与生产部署
-确保 Redis 7.x 在服务本地 (localhost:6379) 运行。
+### Step 1: 接入既有 Redis 服务
+复用现有 K3s Redis，不启动本机 Docker Redis 或 `redis-server`。Redis Pod 固定运行于 OCI `free-arm-vm`，对外由 Kong L4 TCP 转发；GCE VM 必须加入 Tailscale 后访问 `100.105.130.0:6379`。
 
-```bash
-# 本地测试一键启动 Redis
-docker run -d --name litellm-redis -p 6379:6379 redis:7-alpine
+在未提交的 `.env` 中配置：
+```env
+REDIS_HOST=100.105.130.0
+REDIS_PORT=6379
+REDIS_PASSWORD=load-from-private-env
 ```
+
+部署前用 `AUTH + PING` 验证连接；不得在文档、日志或 Git 提交中记录 Redis 密码。
 
 ### Step 2: 在 `config.yaml` 中配置 Redis 速率限制与缓存
 ```yaml
@@ -35,10 +39,11 @@ router_settings:
 
 litellm_settings:
   cache_type: "redis"
-  redis_host: "localhost"
-  redis_port: 6379
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
   cache_params:
-    supported_call_types: ["completion", "text_completion"]
+    supported_call_types: ["chat_completion"]
     ttl: 3600 # 缓存默认过期时间 1 小时
 
 # 限流设置示例
@@ -73,4 +78,4 @@ user_keys:
 ## 4. 风险控制与红线 (Risk Control)
 
 * ⚠️ **敏感 Prompt 缓存清理**：为避免长久存储敏感数据，确保配置合理的 TTL（如 3600s）。
-* ⚠️ **Redis 挂掉容灾 (Degradation)**：配置 Redis 连接超时时间，一旦 Redis 离线，LiteLLM 需自动降级为“跳过缓存与本地内存限流”，绝不直接崩掉主服务。
+* ⚠️ **Redis 挂掉容灾 (Degradation)**：配置 Redis 连接超时时间；既有 Redis、Tailscale 或 Kong 任一不可达时，LiteLLM 需降级为“跳过缓存与本地内存限流”，绝不直接崩掉主服务。

@@ -29,10 +29,21 @@ model_list:
     litellm_params:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
   
   - model_name: gemini-1.5-pro
     litellm_params:
       model: vertex_ai/gemini-1.5-pro
+      vertex_project: os.environ/VERTEXAI_PROJECT
+      vertex_location: os.environ/VERTEXAI_LOCATION
+
+  - model_name: gemini-1.5-flash
+    litellm_params:
+      model: vertex_ai/gemini-1.5-flash
       vertex_project: os.environ/VERTEXAI_PROJECT
       vertex_location: os.environ/VERTEXAI_LOCATION
 
@@ -43,8 +54,8 @@ model_list:
 
 router_settings:
   fallbacks:
-    - gpt-4o: ["gemini-1.5-pro", "claude-3-5-sonnet"]
-    - gemini-1.5-pro: ["gpt-4o-mini", "claude-3-5-sonnet"]
+    - gpt-4o: ["gemini-1.5-pro", "gemini-1.5-flash", "gpt-4o-mini", "claude-3-5-sonnet"]
+    - gemini-1.5-pro: ["gemini-1.5-flash", "gpt-4o-mini", "claude-3-5-sonnet"]
   allowed_fails: 2
   cooldown_time: 30
   num_retries: 3
