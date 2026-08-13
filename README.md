@@ -8,8 +8,9 @@
 
 详细的技术需求规格说明书与架构设计文档请见 `docs/` 目录：
 
-* 📄 **[PRD & 需求规格说明书 (docs/PRD.md)](docs/PRD.md)** - 包含完整的业务需求、技术架构、接口定义、数据库 Schema 及分阶段练手 Roadmap。
+* 📄 **[High-Level Implementation Plan (docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)](docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)** - 包含整体目标、技术架构、接口定义、数据库 Schema 及分阶段实施 Roadmap。
 * 📐 **[技术架构图与流程说明 (docs/ARCHITECTURE.md)](docs/ARCHITECTURE.md)** - 组件数据流图、GCP VM 双进程模型与容灾机制说明。
+* 🧰 **[Phase 1 低层实施计划 (docs/plans/phase_1_low_level_implementation.md)](docs/plans/phase_1_low_level_implementation.md)** - 逐文件、逐方法说明基础设施接入与 LiteLLM Proxy 启动步骤。
 
 ## 🛠️ 技术栈 (Tech Stack)
 

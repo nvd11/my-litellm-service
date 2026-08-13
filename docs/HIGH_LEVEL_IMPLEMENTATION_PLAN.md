@@ -1,4 +1,4 @@
-# 产品需求文档 (PRD) & 技术规格说明书
+# High-Level Implementation Plan (高层实施计划) & 技术规格说明书
 
 **项目名称**：`my-litellm-service` (Enterprise Multi-LLM Gateway & Evaluation Middleware)  
 **作者**：Jason Pan (Senior Cloud & AI Solutions Architect)  
