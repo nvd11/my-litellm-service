@@ -20,7 +20,7 @@
 ### 1.2 项目目标 (Goals)
 `my-litellm-service` 旨在现有 **K3s 集群** 上搭建一套轻量级、企业级的高可用大模型统一网关与评测中间件：
 * 统一屏蔽底层 LLM 差异，暴露标准的 **OpenAI 兼容 API**。
-* 实现 **OCI MySQL 审计日志**，精准异步记录每次请求的 Prompt/Completion Tokens 及 USD 扣费（持久化保存于 OCI 永久免费托管数据库 `rin-heatwave`，防止 GCP 算力被回收导致数据丢失）。
+* 实现 **OCI MySQL 审计日志**，精准异步记录每次请求的 Prompt/Completion Tokens 及 USD 扣费（持久化保存于 OCI 永久免费托管数据库 `rin-heatwave`，避免计算节点故障导致数据丢失）。
 * 复用现有 **K3s Redis**，通过现有 Kong L4 TCP 转发提供速率限制（Rate Limiting）与精确缓存（Caching），不新建 Redis。
 * 基于 **确定性断言 (Option A) 与 黄金数据集比对 (Option B)** 提供客观、微秒级、零额外 API 成本的大模型综合性能（Accuracy, Latency, Cost）评测引擎。
 
@@ -32,42 +32,52 @@
 
 ```
                           +-----------------------------------+
-                          |     Clients / Eval Harness        |
+                          |       Clients / Eval Harness      |
                           +-----------------------------------+
                                             |
-                                            v (HTTP / Port 8000)
+                                            v
                           +-----------------------------------+
-                          |      Process B: FastAPI Service   |
-                          | (Eval Engine: Option A & B Checks)|
+                          | Existing Kong Gateway / Ingress  |
+                          |   HTTP Routes: /llm and /eval     |
                           +-----------------------------------+
-                                            |
-                                            v (HTTP / Port 4000)
-                          +-----------------------------------+
-                          |     Process A: LiteLLM Proxy      |
-                          |    (Unified Router & Middleware)  |
-                          +-----------------------------------+
-                                   /        |        \
-                                  /         |         \
-                                 v          v          v
-                          +-----------+ +-------+ +----------+
-                          | OCI MySQL | | Redis | | LLM APIs |
-                          | HeatWave  | |(Rate- | |(OpenAI/  |
-                          | (Logs/    | |Limit) | |Vertex AI)|
-                          | Budgets)  | |       | |          |
-                          +-----------+ +-------+ +----------+
+                                   |                    |
+                                   v                    v
+              +--------------------------------+  +--------------------------------+
+              | Service A: LiteLLM Deployment  |  | Service B: FastAPI Deployment  |
+              | ClusterIP :4000                |  | ClusterIP :8000                |
+              | Router / Fallback / Cache      |  | Eval / Metrics APIs             |
+              +--------------------------------+  +--------------------------------+
+                         |          ^                         |
+                         |          | Kubernetes DNS           |
+                         |          +-------------------------+
+                         v                                    |
+              +----------------------+                         |
+              | Existing K3s Redis  |                         |
+              | OCI free-arm-vm     |                         |
+              | Kong L4 :6379       |                         |
+              +----------------------+                         |
+                         |                                    |
+                         v                                    v
+              +----------------------+              +----------------------+
+              | OCI MySQL HeatWave  |              | External LLM APIs    |
+              | Logs / Budgets      |              | OpenAI / Vertex AI   |
+              +----------------------+              +----------------------+
+
+  ArgoCD synchronizes both Deployments, Services, ConfigMaps and Secret references
+  from Git into the K3s cluster. Initial scheduling is pinned to OCI free-arm-vm.
 ```
 
-### 2.1 进程与组件职责划分
-1. **Process A: LiteLLM Proxy (Port 4000)**
+### 2.1 服务与组件职责划分
+1. **Service A: LiteLLM Deployment (ClusterIP Port 4000)**
    * 作为核心 LLM 网关，处理协议转换、模型负载均衡与 Failover 路由。
    * 内置 Admin UI 界面，提供模型 Key 管理与配置查看。
    * 通过内置 Hook 将请求耗时、Token 数及美元开销异步写入 OCI MySQL 与 Redis。
-2. **Process B: FastAPI Application (Port 8000)**
+2. **Service B: FastAPI Deployment (ClusterIP Port 8000)**
    * 提供应用层 API、自定义 Benchmark 触发接口及成本统计报表导出。
    * 集成 **方案 A (JSON Schema / Code / Regex)** 与 **方案 B (Golden Answer Matching)** 本地评估引擎。
    * 对外暴露 `/v1/eval/run`、`/v1/metrics/spend` 及健康检查 `/health` 接口。
 3. **Data & Storage Layer**
-   * **OCI MySQL HeatWave (9.7+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`），避免数据随 GCP 计算节点被回收。
+   * **OCI MySQL HeatWave (9.7+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`），避免数据随计算节点故障丢失。
    * **现有 K3s Redis (7+)**：Redis Pod 固定在 OCI `free-arm-vm`，由现有 Kong L4 TCP 转发提供访问；处理并发 API 速率限制、Token 临时 Bucket 计数及常见 Prompt 的缓存响应。项目不得新建本地 Redis 实例。
 
 ---

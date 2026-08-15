@@ -1,6 +1,6 @@
 # 模块三实施计划：本地客观评测引擎 (Eval Engine: Option A + Option B)
 
-> **目标**：在 FastAPI (Process B) 中构建低延迟、客观、零额外 API 成本的大模型评测引擎，支持方案 A (确定性断言) 与 方案 B (黄金数据集比对)。
+> **目标**：在 FastAPI (Service B Deployment) 中构建低延迟、客观、零额外 API 成本的大模型评测引擎，支持方案 A (确定性断言) 与 方案 B (黄金数据集比对)。
 
 ---
 
@@ -83,7 +83,7 @@ async def run_evaluation(eval_payload: dict):
     models = eval_payload.get("models", ["gpt-4o", "gemini-1.5-pro"])
     
     results = []
-    async with httpx.AsyncClient(base_url="http://localhost:4000") as client:
+    async with httpx.AsyncClient(base_url="http://litellm-proxy.llm-system.svc.cluster.local:4000") as client:
         # 并发向多模型发送请求并评估...
         pass
         
@@ -96,7 +96,7 @@ async def run_evaluation(eval_payload: dict):
 
 1. **测试 JSON Schema 评测断言**：
    ```bash
-   curl -X POST http://localhost:8000/v1/eval/run \
+   curl -X POST http://<kong-host>/v1/eval/run \
      -H "Content-Type: application/json" \
      -d '{
        "prompts": [{

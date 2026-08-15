@@ -55,13 +55,13 @@ graph TB
     end
 
     subgraph PROCS["运行时进程与服务架构 (Runtime Distribution)"]
-        subgraph PROC_A["Process A: LiteLLM Proxy (:4000)"]
+        subgraph PROC_A["Service A: LiteLLM Deployment (:4000)"]
             P_Router["Router & Model Fallback"]
             P_Rate["Redis RateLimiter & Cache Hook"]
             P_Log["Async OCI MySQL Callback"]
         end
 
-        subgraph PROC_B["Process B: FastAPI Middleware Service (:8000)"]
+        subgraph PROC_B["Service B: FastAPI Deployment (:8000)"]
             subgraph APP["FastAPI App (app/main.py)"]
                 R_Metrics["routers/metrics.py<br/>GET /v1/metrics/spend"]
                 R_Eval["routers/eval.py<br/>POST /v1/eval/run"]
@@ -81,15 +81,15 @@ graph TB
 
 | 模块 | 模块名称 | 承载进程 | 核心职责与实现机制 |
 | :--- | :--- | :--- | :--- |
-| **模块一** | 多模型路由与自动降级 (Routing & Failover) | **Process A: LiteLLM Proxy** | `config.yaml` 声明 OpenAI / Vertex AI Gemini / Anthropic 模型列表与自动 Fallback 降级规则。 |
-| **模块二 (写)** | 开销审计与 Token 计量 (Data Ingestion) | **Process A: LiteLLM Proxy** | 请求完成后异步 Callback 触发，无感写入 OCI MySQL `llm_request_logs` 表。 |
-| **模块二 (读)** | 开销审计与报表 API (Reporting) | **Process B: FastAPI** | 暴露 `GET /v1/metrics/spend` 接口，查询并汇总数据库中的模型耗费与请求报表。 |
-| **模块三** | 本地客观评测引擎 (Eval Harness) | **Process B: FastAPI** | 暴露 `POST /v1/eval/run` 接口，使用 `asyncio` 并发测试多模型，执行 Option A (断言) 与 Option B (黄金匹配) 校验。 |
+| **模块一** | 多模型路由与自动降级 (Routing & Failover) | **Service A: LiteLLM Deployment** | `config.yaml` 声明 OpenAI / Vertex AI Gemini / Anthropic 模型列表与自动 Fallback 降级规则。 |
+| **模块二 (写)** | 开销审计与 Token 计量 (Data Ingestion) | **Service A: LiteLLM Deployment** | 请求完成后异步 Callback 触发，无感写入 OCI MySQL `llm_request_logs` 表。 |
+| **模块二 (读)** | 开销审计与报表 API (Reporting) | **Service B: FastAPI Deployment** | 暴露 `GET /v1/metrics/spend` 接口，查询并汇总数据库中的模型耗费与请求报表。 |
+| **模块三** | 本地客观评测引擎 (Eval Harness) | **Service B: FastAPI Deployment** | 暴露 `POST /v1/eval/run` 接口，使用 `asyncio` 并发测试多模型，执行 Option A (断言) 与 Option B (黄金匹配) 校验。 |
 | **模块四** | 限流与缓存 (Rate Limit & Cache) | **Service A: LiteLLM Deployment** | 连接现有 K3s Redis 7+（Redis Pod 固定于 OCI `free-arm-vm`，通过 Kong L4 访问），处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存；项目不部署本地 Redis。 |
 
 ---
 
-## 3. FastAPI (Process B) 目录代码结构 (Directory Layout)
+## 3. FastAPI (Service B) 目录代码结构 (Directory Layout)
 
 ```
 app/
