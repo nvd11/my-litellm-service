@@ -19,7 +19,7 @@
 ## 2. 详细实施步骤 (Step-by-Step)
 
 ### Step 1: 接入既有 Redis 服务
-复用现有 K3s Redis，不启动本机 Docker Redis 或 `redis-server`。Redis Pod 固定运行于 OCI `free-arm-vm`，对外由 Kong L4 TCP 转发；GCE VM 必须加入 Tailscale 后访问 `100.105.130.0:6379`。
+复用现有 K3s Redis，不启动应用 Pod 内的 Redis、本机 Docker Redis 或 `redis-server`。Redis Pod 固定运行于 OCI `free-arm-vm`，对外由现有 Kong L4 TCP 转发；LiteLLM Pod 通过集群 Service 或 Tailscale 访问 `100.105.130.0:6379`。
 
 在未提交的 `.env` 中配置：
 ```env

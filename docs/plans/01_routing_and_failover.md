@@ -12,8 +12,8 @@
 2. **Fallback Level 1**: `gemini/gemini-1.5-flash` / `openai/gpt-4o-mini`
 3. **Fallback Level 2**: `anthropic/claude-3-5-sonnet`
 
-### 1.2 GCP 鉴权策略
-在 GCP VM 部署环境中，利用 **Google Application Default Credentials (ADC)** 机制，连接 Vertex AI Gemini 模型无需在配置文件中硬编码 GCP Key。
+### 1.2 Vertex AI 鉴权策略
+在 K3s Pod 中通过 Kubernetes Secret 或 Workload Identity/外部 Secret 注入 Vertex AI 所需身份信息，连接 Vertex AI Gemini 模型无需在配置文件中硬编码 GCP Key。具体采用哪种注入方式由集群身份方案确定。
 
 ---
 

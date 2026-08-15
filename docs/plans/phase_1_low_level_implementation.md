@@ -1,6 +1,6 @@
 # Phase 1 低层实施计划：基础设施接入与 LiteLLM Proxy 启动
 
-> **目标**：在 GCE VM 上完成 Tailscale 网络确认，连接现有 OCI MySQL 与 K3s Redis，配置 LiteLLM Proxy 的模型路由/降级/缓存，并完成不产生 LLM 费用的启动验收。
+> **目标**：在 K3s 部署环境完成网络确认，连接现有 OCI MySQL 与 K3s Redis，配置 LiteLLM Proxy 的模型路由/降级/缓存，并完成不产生 LLM 费用的启动验收。
 
 > **阶段边界**：本阶段只验证数据库和 Redis 的基础连通性并启动 LiteLLM Proxy。请求费用异步落库、MySQL 业务表、FastAPI、评测引擎和正式限流策略分别属于 Phase 2/3/4，不在本阶段实现。
 
@@ -8,7 +8,7 @@
 
 完成后必须满足：
 
-1. GCE VM 已加入 Tailscale，能访问 OCI MySQL `10.0.0.247:3306` 与现有 Redis `100.105.130.0:6379`。
+1. K3s 应用节点能访问 OCI MySQL `10.0.0.247:3306` 与现有 Redis `100.105.130.0:6379`（或集群内 Redis Service）。
 2. MySQL 使用真实账号执行 `SELECT 1` 成功；Redis 使用认证执行 `PING` 返回 `PONG`。
 3. LiteLLM Proxy 能在 `:4000` 启动，`GET /health` 返回成功。
 4. `/v1/models` 能看到项目声明的模型别名。
@@ -77,7 +77,7 @@ uv run ruff check app scripts tests
 
 ### 3.2 虚拟环境
 
-在仓库根目录创建唯一虚拟环境 `.venv`，LiteLLM Proxy 与连接检查脚本共用，不为两个进程创建两个 venv。使用 `uv` 管理环境和锁文件：
+在仓库根目录创建唯一虚拟环境 `.venv`，LiteLLM Proxy、后续 FastAPI 服务与连接检查脚本共用，不为两个服务进程创建两个 venv。两个服务通过各自的入口程序分别启动：LiteLLM 使用 `.venv/bin/litellm`，FastAPI 使用 `.venv/bin/uvicorn`。使用 `uv` 管理环境和锁文件：
 
 ```bash
 uv venv --python 3.12
@@ -307,7 +307,7 @@ Phase 1 不在 `config.yaml` 中配置费用数据库 callback 或 `database_url
 
 ## 11. 实际执行顺序
 
-1. 确认 GCE VM 的 Tailscale 状态为 running；确认路由可达 `10.0.0.247` 和 `100.105.130.0`。
+1. 确认应用 Pod 所在节点的网络/Tailscale 状态正常；确认路由可达 `10.0.0.247` 和 `100.105.130.0`，或通过集群 Service 访问 Redis。
 2. 执行 `uv venv --python 3.12`、`uv lock` 和 `uv sync --dev`，安装 `pyproject.toml` 依赖。
 3. 从 `.env.example` 复制 `.env`，只在本机填入真实连接信息。
 4. 运行 `uv run python -m scripts.check_phase1`，先修复网络、账号或认证问题，再继续。
@@ -328,7 +328,7 @@ Phase 1 不在 `config.yaml` 中配置费用数据库 callback 或 `database_url
 - 不执行 MySQL `CREATE TABLE`；DDL 属于 Phase 2。
 - 不配置 LiteLLM 成本数据库 callback；避免在表结构未确定时产生不可追踪数据。
 - 不创建 FastAPI 监听端口 `8000` 的服务；FastAPI 属于 Phase 3。
-- 不在 GCE、本地 Docker 或 OCI VM 重新部署 Redis；只复用现有 K3s Redis。
+- 不在应用 Pod、节点 Docker 或 OCI VM 重新部署 Redis；只复用现有 K3s Redis。
 - 不用真实故障反复触发 fallback；先做静态配置检查和一次受控演练。
 - 不把真实 Secret 写入 YAML、Python 源码、测试 fixture 或 Git 历史。
 

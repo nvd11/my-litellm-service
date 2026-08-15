@@ -1,6 +1,6 @@
 # 技术架构与数据流设计 (Technical Architecture & Data Flow)
 
-本文档补充说明 `my-litellm-service` 的底层架构设计、多进程通信流程、四大核心模块职责映射、FastAPI 目录结构、GCP 部署架构与容灾切换逻辑。
+本文档补充说明 `my-litellm-service` 的底层架构设计、服务间通信流程、四大核心模块职责映射、FastAPI 目录结构，以及 K3s + ArgoCD + Kong 部署架构与容灾切换逻辑。
 
 ---
 
@@ -8,22 +8,28 @@
 
 ```mermaid
 graph TB
-    subgraph GCP_VM["GCP Compute Engine VM (Ubuntu 22.04 LTS)"]
-        subgraph Process_B["Process B: FastAPI Middleware (Port 8000)"]
+    subgraph K3S["Tencent Cloud K3s Cluster"]
+        subgraph Node["OCI free-arm-vm (ARM64)"]
+        subgraph Service_B["Service B: FastAPI Deployment (Port 8000)"]
             EvalRouter["/v1/eval/run (Eval Engine)"]
             MetricsRouter["/v1/metrics/spend (Spend Reporting)"]
         end
 
-        subgraph Process_A["Process A: LiteLLM Proxy (Port 4000)"]
+        subgraph Service_A["Service A: LiteLLM Deployment (Port 4000)"]
             Router["LLM Router & Failover"]
             RateLimiter["Rate Limiter & Cache Hook"]
             DBHook["Async Cost Logging Hook"]
         end
+        end
+        Kong["Existing Kong Gateway / Ingress"]
+        ArgoCD["ArgoCD GitOps"]
     end
 
-    Client["Clients / Harness"] -->|Chat Request :4000| Router
-    Client -->|Eval & Spend API :8000| Process_B
-    Process_B -->|Async Concurrent Requests :4000| Router
+    Client["Clients / Harness"] --> Kong
+    Kong -->|HTTP Route :4000| Router
+    Kong -->|HTTP Route :8000| Service_B
+    Service_B -->|Kubernetes DNS :4000| Router
+    ArgoCD -->|Sync manifests| K3S
 
     RateLimiter <-->|Tailscale + Kong L4\nRPM/TPM & Exact Cache| Redis[("Existing K3s Redis 7+\nOCI free-arm-vm, :6379")]
     DBHook -->|Async Cost Insert| MySQL[("OCI MySQL HeatWave 9.7+\nrin-heatwave (10.0.0.247:3306)")]
@@ -79,7 +85,7 @@ graph TB
 | **模块二 (写)** | 开销审计与 Token 计量 (Data Ingestion) | **Process A: LiteLLM Proxy** | 请求完成后异步 Callback 触发，无感写入 OCI MySQL `llm_request_logs` 表。 |
 | **模块二 (读)** | 开销审计与报表 API (Reporting) | **Process B: FastAPI** | 暴露 `GET /v1/metrics/spend` 接口，查询并汇总数据库中的模型耗费与请求报表。 |
 | **模块三** | 本地客观评测引擎 (Eval Harness) | **Process B: FastAPI** | 暴露 `POST /v1/eval/run` 接口，使用 `asyncio` 并发测试多模型，执行 Option A (断言) 与 Option B (黄金匹配) 校验。 |
-| **模块四** | 限流与缓存 (Rate Limit & Cache) | **Process A: LiteLLM Proxy** | 连接现有 K3s Redis 7+（OCI `free-arm-vm` 的 Pod，经 Kong L4 与 Tailscale 访问），处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存；GCE 不部署本地 Redis。 |
+| **模块四** | 限流与缓存 (Rate Limit & Cache) | **Service A: LiteLLM Deployment** | 连接现有 K3s Redis 7+（Redis Pod 固定于 OCI `free-arm-vm`，通过 Kong L4 访问），处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存；项目不部署本地 Redis。 |
 
 ---
 
@@ -149,29 +155,52 @@ sequenceDiagram
 
 ---
 
-## 5. GCP 部署与 Systemd 守护策略 (Systemd Supervision)
+## 5. K3s + ArgoCD + Kong 部署策略
 
-使用 Systemd 在 GCP VM 上守护进程：
+Service A 和 Service B 使用两个独立的 Kubernetes `Deployment`，分别运行在
+独立 Pod 中，但继续共用本仓库的代码、`pyproject.toml`、`uv.lock` 和依赖体系。
+容器内部不创建两个 venv；镜像只构建一套 Python 3.12 运行环境，通过不同入口
+程序和端口区分两个服务：
 
-### `litellm.service` 示例配置
-```ini
-[Unit]
-Description=LiteLLM Proxy Service
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=gateman
-WorkingDirectory=/home/gateman/projects/my-litellm-service
-ExecStart=/usr/local/bin/litellm --config config.yaml --port 4000
-Restart=always
-RestartSec=5
-EnvironmentFile=/home/gateman/projects/my-litellm-service/.env
-
-[Install]
-WantedBy=multi-user.target
+```text
+同一个 Python 3.12 镜像/依赖环境
+├── litellm --config config.yaml --port 4000  -> Service A
+└── uvicorn app.main:app --port 8000         -> Service B
 ```
+
+推荐资源布局：
+
+```text
+deploy/k8s/
+├── namespace.yaml
+├── configmap.yaml
+├── secret.example.yaml
+├── litellm-deployment.yaml
+├── litellm-service.yaml       # ClusterIP :4000
+├── fastapi-deployment.yaml
+├── fastapi-service.yaml       # ClusterIP :8000
+└── ingress.yaml               # 由现有 Kong 处理入口
+```
+
+两个 Deployment 初期可通过 `nodeSelector` 固定到 OCI `free-arm-vm`，但必须设置
+合理的 `resources.requests`、`resources.limits`，避免与 Redis、Kong 争抢节点资源。
+不使用 `hostNetwork`，也不在应用 Pod 中绑定节点端口。
+
+ArgoCD 的 Application 负责指定目标 K3s 集群、命名空间和 manifest 路径；Kubernetes
+manifest 负责镜像、端口、探针、资源限制和节点调度。建议沿用两层 GitOps 职责：
+
+- 本仓库：应用源码、Dockerfile、LiteLLM 配置和 `deploy/k8s/` workload manifests。
+- `my-argocd-manifests`：ArgoCD Application 注册文件，只负责把本仓库同步到目标集群。
+
+Service B 通过集群内 DNS 调用 LiteLLM：
+
+```text
+http://litellm-proxy.llm-system.svc.cluster.local:4000
+```
+
+外部流量统一经过现有 Kong Gateway；不新增第二个 Kong。LiteLLM 和 FastAPI 是否
+对外暴露，由 Kong 的 HTTPRoute/Ingress 规则决定；Redis 继续使用现有 Kong L4
+TCP 转发，不在本项目内重新部署 Redis。
 
 ---
 *End of Architectural Specification.*

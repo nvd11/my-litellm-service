@@ -4,7 +4,7 @@
 **作者**：Jason Pan (Senior Cloud & AI Solutions Architect)  
 **版本**：v1.1.0 (Updated: Deterministic & Golden Dataset Evaluation Engine)  
 **状态**：Draft for Hands-On Implementation  
-**目标平台**：GCP Compute Engine (VM), OCI MySQL HeatWave Always Free (`rin-heatwave`), Redis  
+**目标平台**：Tencent Cloud K3s 集群（OCI `free-arm-vm` 节点）, ArgoCD, 现有 Kong Gateway, OCI MySQL HeatWave Always Free (`rin-heatwave`), Redis
 
 ---
 
@@ -18,17 +18,17 @@
 4. **大模型评测（Eval Harness）缺乏基础设施**：业务团队在对比不同模型（如 Gemini 1.5 Pro vs GPT-4o）的响应质量、延迟和单次成本时，缺乏客观、零额外开销的评测中间件。
 
 ### 1.2 项目目标 (Goals)
-`my-litellm-service` 旨在在 **GCP Compute Engine** 上搭建一套轻量级、企业级的高可用大模型统一网关与评测中间件：
+`my-litellm-service` 旨在现有 **K3s 集群** 上搭建一套轻量级、企业级的高可用大模型统一网关与评测中间件：
 * 统一屏蔽底层 LLM 差异，暴露标准的 **OpenAI 兼容 API**。
 * 实现 **OCI MySQL 审计日志**，精准异步记录每次请求的 Prompt/Completion Tokens 及 USD 扣费（持久化保存于 OCI 永久免费托管数据库 `rin-heatwave`，防止 GCP 算力被回收导致数据丢失）。
-* 复用现有 **K3s Redis**，通过 Tailscale 与 Kong L4 TCP 转发提供速率限制（Rate Limiting）与精确缓存（Caching），不在 GCE VM 新建 Redis。
+* 复用现有 **K3s Redis**，通过现有 Kong L4 TCP 转发提供速率限制（Rate Limiting）与精确缓存（Caching），不新建 Redis。
 * 基于 **确定性断言 (Option A) 与 黄金数据集比对 (Option B)** 提供客观、微秒级、零额外 API 成本的大模型综合性能（Accuracy, Latency, Cost）评测引擎。
 
 ---
 
 ## 2. 系统整体架构设计 (System Architecture)
 
-系统基于 **"One VM, Two Processes"**（单虚拟机双进程）架构模式设计，兼顾部署简易性与高性能并发能力。
+系统基于 **"One Repository, Two Deployments"**（单代码仓库、双 Kubernetes Deployment）架构模式设计，兼顾服务隔离、独立发布与运维简易性。
 
 ```
                           +-----------------------------------+
@@ -68,7 +68,7 @@
    * 对外暴露 `/v1/eval/run`、`/v1/metrics/spend` 及健康检查 `/health` 接口。
 3. **Data & Storage Layer**
    * **OCI MySQL HeatWave (9.7+)**：持久化存储请求日志（`llm_request_logs`）及评测结果（`eval_benchmarks`），避免数据随 GCP 计算节点被回收。
-   * **现有 K3s Redis (7+)**：Redis Pod 固定在 OCI `free-arm-vm`，由 Kong L4 TCP 转发并经 Tailscale 供 GCE VM 访问；处理并发 API 速率限制、Token 临时 Bucket 计数及常见 Prompt 的缓存响应。项目不得新建本地 Redis 实例。
+   * **现有 K3s Redis (7+)**：Redis Pod 固定在 OCI `free-arm-vm`，由现有 Kong L4 TCP 转发提供访问；处理并发 API 速率限制、Token 临时 Bucket 计数及常见 Prompt 的缓存响应。项目不得新建本地 Redis 实例。
 
 ---
 
@@ -179,7 +179,7 @@ FASTAPI_PORT=8000
 ## 6. 主人实战练习 Roadmap (Hands-On Execution Plan)
 
 ### 阶段一：基础设施接入与 LiteLLM 代理启动 (Phase 1)
-- [ ] 将 GCE VM 接入 Tailscale，连通 OCI MySQL (`10.0.0.247:3306`) 与现有 K3s Redis（`100.105.130.0:6379`）；Redis 密码仅从私有 `.env` 读取。
+- [ ] 确认 K3s 节点可通过现有网络访问 OCI MySQL (`10.0.0.247:3306`) 与 Redis Service/Kong L4（`6379`）；Redis 密码仅从 Kubernetes Secret 或外部 Secret 注入。
 - [ ] 编写 LiteLLM 配置文件 `config.yaml`，声明 OpenAI、Gemini 及 Claude 的模型路由与 Fallback 机制。
 - [ ] 启动 LiteLLM Proxy 进程，验证 `http://localhost:4000/health` 及 `/v1/chat/completions`。
 
@@ -193,10 +193,13 @@ FASTAPI_PORT=8000
 - [ ] 实现 `/v1/eval/run` 评测接口：使用 Python 协程并发测试多个模型的响应速度、开销与准确率。
 - [ ] 实现 `/v1/metrics/spend` 接口：读取 OCI MySQL 统计当日与累计的花费账单。
 
-### 阶段四：GCP Compute Engine 部署与 Systemd 守护 (Phase 4)
-- [ ] 在 GCP Compute Engine 上创建 Ubuntu 22.04 VM 实例。
-- [ ] 编写 Systemd 服务文件 `litellm.service` 与 `fastapi.service`，实现双进程守护与开机自启。
-- [ ] 进行完整联调与压力测试。
+### 阶段四：K3s + ArgoCD 部署与 Kong 接入 (Phase 4)
+- [ ] 编写 Python 3.12 多架构容器镜像，验证 ARM64 运行兼容性。
+- [ ] 编写 LiteLLM 与 FastAPI 两个独立 Deployment、ClusterIP Service、ConfigMap、Secret 引用和健康探针。
+- [ ] 为两个 Deployment 配置资源 requests/limits；初期使用 `nodeSelector` 将其部署到 OCI `free-arm-vm`。
+- [ ] 在现有 Kong Gateway 中增加 HTTP 路由；不部署第二个 Kong，不使用 `hostNetwork`。
+- [ ] 在 `my-argocd-manifests` 中注册 ArgoCD Application，启用 automated sync、selfHeal 和受控 prune。
+- [ ] 进行完整联调、滚动更新、故障自愈和压力测试。
 
 ---
 
