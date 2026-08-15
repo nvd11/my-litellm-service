@@ -16,7 +16,7 @@
 
 * **Infrastructure**: GCP Compute Engine (Ubuntu 22.04 LTS), Systemd / Docker Compose
 * **API Gateway**: LiteLLM Proxy (Unified OpenAI-compatible API)
-* **Backend Middleware**: Python 3.11, FastAPI, Uvicorn, Pydantic
+* **Backend Middleware**: Python 3.12, FastAPI, Uvicorn, Pydantic
 * **Database & Cache**: OCI MySQL HeatWave Always Free 9.7+ (Cost & Request Logging), existing K3s Redis 7+ via Kong L4 and Tailscale (Rate Limiting & Caching)
 * **LLM Providers**: OpenAI, Google Vertex AI (Gemini), Anthropic Claude
 

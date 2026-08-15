@@ -48,7 +48,7 @@ Phase 1 实现后，新增或修改的文件应限定为：
 
 ### 3.1 `pyproject.toml`
 
-使用 Python 3.11，使用 `uv` 解析和安装依赖；项目元数据与依赖声明统一放在 `pyproject.toml`，锁定结果写入 `uv.lock`。
+使用 Python 3.12，使用 `uv` 解析和安装依赖；项目元数据与依赖声明统一放在 `pyproject.toml`，锁定结果写入 `uv.lock`。
 
 运行依赖：
 
@@ -80,7 +80,7 @@ uv run ruff check app scripts tests
 在仓库根目录创建唯一虚拟环境 `.venv`，LiteLLM Proxy 与连接检查脚本共用，不为两个进程创建两个 venv。使用 `uv` 管理环境和锁文件：
 
 ```bash
-uv venv --python 3.11
+uv venv --python 3.12
 uv lock
 uv sync --dev
 ```
@@ -308,7 +308,7 @@ Phase 1 不在 `config.yaml` 中配置费用数据库 callback 或 `database_url
 ## 11. 实际执行顺序
 
 1. 确认 GCE VM 的 Tailscale 状态为 running；确认路由可达 `10.0.0.247` 和 `100.105.130.0`。
-2. 执行 `uv venv --python 3.11`、`uv lock` 和 `uv sync --dev`，安装 `pyproject.toml` 依赖。
+2. 执行 `uv venv --python 3.12`、`uv lock` 和 `uv sync --dev`，安装 `pyproject.toml` 依赖。
 3. 从 `.env.example` 复制 `.env`，只在本机填入真实连接信息。
 4. 运行 `uv run python -m scripts.check_phase1`，先修复网络、账号或认证问题，再继续。
 5. 运行 `uv run pytest -q` 与 `uv run ruff check app scripts tests`。
