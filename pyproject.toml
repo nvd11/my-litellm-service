@@ -41,6 +41,9 @@ src = ["app", "scripts", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]
+
 # 统一使用双引号和空格缩进。
 [tool.ruff.format]
 quote-style = "double"
