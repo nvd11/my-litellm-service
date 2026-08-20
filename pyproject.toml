@@ -1,0 +1,47 @@
+# 项目元数据与运行时依赖配置。
+[project]
+name = "my-litellm-service"
+version = "0.1.0"
+description = "Enterprise multi-LLM gateway, cost tracking, and evaluation middleware."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+# 生产运行时依赖：LiteLLM Gateway、FastAPI Service 以及 MySQL/Redis 客户端。
+dependencies = [
+    "aiomysql>=0.2.0,<1.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "litellm>=1.74.0,<2.0.0",
+    "pydantic-settings>=2.6.0,<3.0.0",
+    "redis[hiredis]>=5.2.0,<7.0.0",
+    "uvicorn[standard]>=0.32.0,<1.0.0",
+]
+
+# 开发依赖：只用于测试、静态检查和配置文件校验，不属于生产运行时必需依赖。
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0,<9.0.0",
+    "pytest-asyncio>=0.24.0,<2.0.0",
+    "pyyaml>=6.0.0,<7.0.0",
+    "ruff>=0.8.0,<1.0.0",
+]
+
+# pytest 配置：启用 asyncio 自动模式，并限定测试目录。
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# Ruff 代码检查与格式化配置。
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "scripts", "tests"]
+
+# 启用常见错误、未使用代码、import 排序、Bug 风险和 Python 升级规则。
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+# 统一使用双引号和空格缩进。
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
