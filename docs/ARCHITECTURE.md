@@ -89,7 +89,76 @@ graph TB
 
 ---
 
-## 3. FastAPI (Service B) 目录代码结构 (Directory Layout)
+## 3. 单仓库代码与部署目录结构 (Repository Layout)
+
+项目采用 **One Repository, Two Deployments**：LiteLLM Gateway 与 FastAPI
+Application 是两个独立的 Kubernetes Deployment，但共用同一个 Git 仓库、
+`pyproject.toml`、`uv.lock`、Docker 镜像和 Python 3.12 运行环境。
+
+```text
+my-litellm-service/
+├── README.md
+├── pyproject.toml                 # 统一依赖与项目配置
+├── uv.lock                        # 统一依赖锁定文件
+├── .env.example                   # 非敏感配置模板
+├── .gitignore
+├── config.yaml                    # Service A: LiteLLM 路由/Fallback/缓存配置
+├── Dockerfile                     # 构建供两个 Deployment 共用的镜像
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # Service B: FastAPI 应用入口
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── config.py              # 环境变量与配置校验
+│   │   ├── database.py            # OCI MySQL 异步连接池
+│   │   └── redis.py               # Redis 异步连接池
+│   ├── callbacks/
+│   │   ├── __init__.py
+│   │   └── cost_logger.py         # Service A: 费用日志异步落库
+│   ├── eval/
+│   │   ├── __init__.py
+│   │   ├── evaluators.py          # Option A/B 评测算法
+│   │   └── service.py             # 并发调用 LiteLLM
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── schemas.py             # FastAPI Pydantic 模型
+│   └── routers/
+│       ├── __init__.py
+│       ├── eval.py                # POST /v1/eval/run
+│       ├── metrics.py             # GET /v1/metrics/spend
+│       └── health.py              # FastAPI 健康检查
+│
+├── scripts/
+│   ├── __init__.py
+│   ├── check_phase1.py            # MySQL/Redis 连通性检查
+│   ├── smoke_proxy.py             # LiteLLM 烟囱测试
+│   └── init_db.sql                # Phase 2: MySQL DDL
+│
+├── tests/
+│   ├── test_config.py
+│   ├── test_connectivity.py
+│   ├── test_evaluators.py
+│   └── test_api.py
+│
+├── deploy/
+│   └── k8s/
+│       ├── namespace.yaml
+│       ├── configmap.yaml
+│       ├── secret.example.yaml
+│       ├── litellm-deployment.yaml
+│       ├── litellm-service.yaml
+│       ├── fastapi-deployment.yaml
+│       ├── fastapi-service.yaml
+│       └── ingress.yaml            # 由现有 Kong 处理入口
+│
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── HIGH_LEVEL_IMPLEMENTATION_PLAN.md
+    └── plans/
+```
+
+### 3.1 FastAPI (Service B) 代码结构
 
 ```
 app/
@@ -106,6 +175,10 @@ app/
 └── models/
     └── schemas.py           # Pydantic 数据请求与响应校验模型
 ```
+
+`app/callbacks/` 属于 LiteLLM Service A 的扩展逻辑；`app/eval/`、
+`app/routers/` 和 `app/main.py` 属于 FastAPI Service B。两个服务不会创建
+各自独立的虚拟环境，也不会拆分成两个代码仓库。
 
 ---
 
