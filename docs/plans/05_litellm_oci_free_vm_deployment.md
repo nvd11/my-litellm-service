@@ -1,0 +1,527 @@
+# LiteLLM 部署到 OCI `free-arm-vm` 的实施计划
+
+## 1. 目标与结论
+
+本计划用于将当前项目中的 LiteLLM Proxy 部署到 Tencent Cloud K3s 集群中的 OCI `free-arm-vm` 节点。
+
+当前已经具备开始部署准备的条件：
+
+- 本地 LiteLLM Proxy 已经能够启动。
+- Gemini OpenAI 兼容调用已经验证成功。
+- 当前模型配置为 `gemini-3.6-flash-freelayer`。
+- Redis 缓存配置已经在 `config.yaml` 中启用。
+- K3s 集群中已有 Redis、Kong/KIC 和 ArgoCD，不重复创建这些基础设施。
+- `free-arm-vm` 是 ARM64 节点，需要使用 ARM64 或多架构容器镜像。
+
+但仓库目前还缺少 Kubernetes 部署所需的镜像和清单，因此本阶段先完成部署材料和验证设计，不直接修改云资源或执行集群部署。
+
+## 2. 第一阶段的部署边界
+
+第一阶段只部署 LiteLLM Service A：
+
+```text
+客户端 -> 现有 Kong/KIC -> LiteLLM Proxy -> Gemini API
+                                      |
+                                      -> 现有 K3s Redis
+```
+
+暂不纳入以下内容：
+
+- FastAPI Service B。
+- OCI MySQL 审计日志和费用统计。
+- 新建 Redis、Kong、Ingress Controller 或数据库。
+- 将 Redis `6379` 暴露到公网。
+- 将 LiteLLM 容器日志直接写入容器内的 `/var/log`。
+
+这样可以先验证最小生产链路：模型调用、OpenAI 格式 API、Redis 精确缓存、Kong 路由和 API Key 鉴权。
+
+## 实施步骤与交付物总览
+
+每个阶段都必须有明确的交付物。交付物可以是代码文件、镜像、Kubernetes 资源、测试记录或验收结果；只有交付物完成并通过对应检查，才能进入下一阶段。
+
+| 阶段 | 实施目标 | 必须交付的成果 | 阶段完成标准 |
+| --- | --- | --- | --- |
+| 0. 环境确认 | 确认目标节点、Redis、Kong、镜像仓库和 Secret 方案 | 环境确认记录、节点标签、Redis Service 信息、Kong 接入方式记录 | 所有部署前置事实已确认，没有依赖猜测值 |
+| 1. 容器化 | 构建可在 ARM64 节点运行的 LiteLLM 镜像 | `Dockerfile`、`.dockerignore`、镜像标签、镜像构建记录 | 容器能够启动并读取配置，镜像不包含真实密钥 |
+| 2. Kubernetes 基础部署 | 在集群内启动 LiteLLM | Namespace、ConfigMap、Secret 创建记录、Deployment、ClusterIP Service | Pod 在 `free-arm-vm` Running，集群内 API 调用成功 |
+| 3. Redis 联调 | 验证缓存和 Redis 网络连接 | Redis 连接测试记录、重复请求缓存测试记录 | `AUTH`、`PING`、缓存命中均成功，Redis 未暴露公网 |
+| 4. Kong 接入 | 通过现有网关提供外部 HTTPS API | HTTPRoute/Ingress、TLS 配置、路由测试记录 | 外部请求经过 Kong 成功到达 LiteLLM |
+| 5. ArgoCD 纳管 | 建立 GitOps 发布和恢复能力 | ArgoCD Application、同步记录、回滚记录 | Application 显示 `Synced` 和 `Healthy` |
+
+后续章节分别说明每个阶段需要编写的文件、执行的动作和验收证据。
+
+### 交付物命名和保存原则
+
+- 应提交到代码仓库的文件进入本项目或约定的 GitOps 清单仓库。
+- 真实 Secret 不提交到 Git；只提交 `secret.example.yaml` 或 Secret 创建说明。
+- 镜像使用 Git commit SHA 或版本号作为不可变标签，并记录完整镜像地址。
+- 测试结果保存为 Markdown、命令输出或 CI 构建记录，不能只依赖口头确认。
+- 所有生产配置都要能追溯到对应的 Git commit、镜像标签和 ArgoCD revision。
+
+### 交付物的 Repo 与路径
+
+当前应用仓库已确认是：
+
+```text
+Repo: nvd11/my-litellm-service
+本地路径: /home/gateman/projects/github/my-litellm-service
+```
+
+应用代码、镜像构建文件、LiteLLM 配置和 Kubernetes workload manifest 统一放在这个 Repo。ArgoCD Application 不放在应用 Repo，而放在单独的 GitOps Repo：
+
+```text
+Repo: my-argocd-manifests
+用途: 只保存 ArgoCD Application 注册文件
+```
+
+`my-argocd-manifests` 的本地 checkout 路径和具体目录当前尚未在本机确认，因此计划中统一使用占位路径 `<argocd-manifests-path>`；实际实施前必须替换为真实路径。
+
+| 交付物 | 所属 Repo | 仓库内位置或外部位置 | 是否提交真实敏感信息 |
+| --- | --- | --- | --- |
+| Dockerfile | `nvd11/my-litellm-service` | `/Dockerfile` | 否 |
+| Docker 构建排除规则 | `nvd11/my-litellm-service` | `/.dockerignore` | 否 |
+| Python 依赖和版本约束 | `nvd11/my-litellm-service` | `/pyproject.toml`、`/uv.lock` | 否；锁文件只记录依赖版本 |
+| LiteLLM 模型配置 | `nvd11/my-litellm-service` | `/config.yaml` | 否；只使用 `os.environ/...` 引用 |
+| 环境变量模板 | `nvd11/my-litellm-service` | `/.env.example` | 否；只使用占位值 |
+| Kubernetes Namespace | `nvd11/my-litellm-service` | `/deploy/k8s/namespace.yaml` | 否 |
+| LiteLLM ConfigMap | `nvd11/my-litellm-service` | `/deploy/k8s/configmap.yaml` | 否 |
+| Secret 字段模板 | `nvd11/my-litellm-service` | `/deploy/k8s/secret.example.yaml` | 否；不能放真实值 |
+| LiteLLM Deployment | `nvd11/my-litellm-service` | `/deploy/k8s/litellm-deployment.yaml` | 否；只引用 Secret |
+| LiteLLM ClusterIP Service | `nvd11/my-litellm-service` | `/deploy/k8s/litellm-service.yaml` | 否 |
+| Kong HTTPRoute/Ingress | `nvd11/my-litellm-service` | `/deploy/k8s/kong-route.yaml` | 否；TLS 私钥不提交 |
+| Secret 实例 | 集群 Secret 管理系统 | Namespace `llm-system` 中的 Secret，例如 `litellm-secrets` | 不进入 Git；由安全流程创建 |
+| ARM64/多架构容器镜像 | 容器镜像仓库 | `<registry>/<repository>:<git-sha>` | 不包含 API Key |
+| 镜像构建记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/01-image-build.md` | 否 |
+| 环境确认记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/00-environment.md` | 不记录密码和完整密钥 |
+| 集群内部署验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/02-in-cluster-validation.md` | 否；脱敏命令输出 |
+| Redis 缓存验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/03-redis-cache.md` | 否；不记录密码 |
+| Kong 外部访问验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/04-kong-validation.md` | 否；请求头中的 Key 必须脱敏 |
+| ArgoCD Application | `my-argocd-manifests` | `<argocd-manifests-path>/applications/my-litellm-service.yaml` | 否；不内嵌 Secret |
+| ArgoCD 同步与回滚记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/05-argocd-release.md` | 否 |
+| 本部署计划 | `nvd11/my-litellm-service` | `/docs/plans/05_litellm_oci_free_vm_deployment.md` | 否 |
+
+其中，`docs/plans/evidence/05_litellm_oci_free_vm/` 是部署证据目录；它保存脱敏后的命令、状态和测试结果，不保存 API Key、Redis 密码、TLS 私钥或完整 Authorization Header。
+
+### Repo 职责边界
+
+```text
+nvd11/my-litellm-service
+├── 应用源码和测试
+├── Dockerfile 和依赖
+├── config.yaml
+├── deploy/k8s/ workload manifests
+└── docs/plans/evidence/ 部署证据
+
+my-argocd-manifests
+└── ArgoCD Application 注册文件
+```
+
+应用 Repo 的 Kubernetes 清单负责描述 LiteLLM 如何运行；GitOps Repo 的 ArgoCD Application 负责描述 ArgoCD 从哪个 Repo、哪个 revision、哪个路径同步这些清单。两者不能混成一个文件，也不能把生产 Secret 复制到任一普通 Git Repo。
+
+## 3. 需要新增或整理的仓库内容
+
+建议新增以下目录和文件。它们是容器化和 Kubernetes 部署阶段的主要代码交付物：
+
+```text
+deploy/
+└── k8s/
+    ├── namespace.yaml
+    ├── configmap.yaml
+    ├── secret.example.yaml
+    ├── litellm-deployment.yaml
+    ├── litellm-service.yaml
+    └── kong-route.yaml
+```
+
+根目录还需要增加面向 ARM64 的 `Dockerfile`。真实密钥只进入 Kubernetes Secret 或外部 Secret 管理系统，不进入 Git，也不写入镜像层。
+
+本节的交付物为：
+
+- [ ] `Dockerfile`。
+- [ ] `.dockerignore`。
+- [ ] `deploy/k8s/namespace.yaml`。
+- [ ] `deploy/k8s/configmap.yaml`。
+- [ ] `deploy/k8s/secret.example.yaml`。
+- [ ] `deploy/k8s/litellm-deployment.yaml`。
+- [ ] `deploy/k8s/litellm-service.yaml`。
+- [ ] `deploy/k8s/kong-route.yaml`。
+- [ ] 一份不包含真实凭证的部署说明。
+
+## 4. 容器镜像方案
+
+### 4.1 运行环境
+
+- Python 3.12。
+- 安装项目生产依赖，包括 `litellm[proxy]`。
+- 使用锁定后的依赖版本构建镜像。
+- 镜像使用非 root 用户运行。
+- 容器入口直接启动 LiteLLM CLI：
+
+```text
+litellm --config /app/config/config.yaml --port 4000
+```
+
+LiteLLM 需要 proxy extra 中的依赖。之前本地启动时缺少 `backoff`，以及 FastAPI 版本不兼容，说明镜像必须从项目依赖文件完整安装，不能只安装一个不带 proxy extra 的 LiteLLM 基础包。
+
+### 4.2 ARM64 兼容性
+
+镜像发布前需要确认以下任一方案：
+
+1. 构建并推送 ARM64 镜像；或
+2. 构建包含 `linux/arm64` 的多架构镜像。
+
+部署清单中的镜像标签必须是不可变版本标签，例如 Git commit SHA，不使用长期漂移的 `latest`。
+
+### 4.3 日志策略
+
+Kubernetes 中优先让 LiteLLM、Uvicorn 和应用日志输出到 stdout/stderr，由 Kubernetes 日志系统采集：
+
+```bash
+kubectl logs -n llm-system deploy/litellm
+```
+
+不把主机路径 `/var/log` 挂载进容器。若后续确实需要文件日志，应单独设计日志采集和持久化方案，而不是让应用容器自行管理日志文件。
+
+## 5. Namespace、ConfigMap 与 Secret
+
+Namespace 建议使用：
+
+```text
+llm-system
+```
+
+### 5.1 ConfigMap 中保存非敏感配置
+
+ConfigMap 可以保存 LiteLLM 配置文件或其非敏感部分，例如：
+
+- 暴露端口 `4000`。
+- 模型别名 `gemini-3.6-flash-freelayer`。
+- Redis 端口 `6379`。
+- 缓存 TTL `3600`。
+- LiteLLM 的非敏感运行参数。
+
+当前项目的 `config.yaml` 使用 `os.environ/...` 读取密钥，因此配置文件本身不应包含真实 API Key 或密码。
+
+### 5.2 Secret 中保存敏感配置
+
+至少需要注入以下三个变量：
+
+```text
+OPENAI_API_KEY_FREE_1
+LITELLM_MASTER_KEY
+REDIS_PASSWORD
+```
+
+两类 API Key 的职责不同，不能混用：
+
+```text
+客户端 -> LiteLLM：Authorization: Bearer <LITELLM_MASTER_KEY>
+LiteLLM -> Gemini：OPENAI_API_KEY_FREE_1
+```
+
+`secret.example.yaml` 只提供字段示例或生成命令，不放真实值。生产环境应通过 SealedSecret、External Secrets 或集群外的安全交付流程创建 Secret。
+
+## 6. LiteLLM 配置与 Redis 地址
+
+当前配置的核心内容是：
+
+```yaml
+model_list:
+  - model_name: gemini-3.6-flash-freelayer
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
+
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
+    supported_call_types: [chat_completion]
+    ttl: 3600
+```
+
+LiteLLM Pod 位于同一个 K3s 集群时，Redis 应优先使用 Kubernetes Service DNS，而不是通过 Tailscale 或 Kong 绕行：
+
+```text
+redis.redis.svc.cluster.local:6379
+```
+
+这里的 Service 名称和 Namespace 必须在部署前用 `kubectl get svc -A` 确认。如果实际名称不同，以集群中的 Redis Service 为准。
+
+只有集群外、已经加入 Tailscale 的客户端才考虑使用现有的 Tailscale/Kong 地址，例如 `100.105.130.0:6379`。该地址不应作为集群内 Pod 的首选路径。
+
+本地机器上的代理地址 `10.0.1.105:7890` 不能直接复制到 Kubernetes 配置中。Pod 是否需要代理，取决于 `free-arm-vm` 的出网能力和代理是否可从该节点访问。部署前应单独确认 Gemini API 的 DNS、HTTPS 出站连接和代理需求。
+
+## 7. Deployment 设计
+
+第一阶段使用单副本，先验证稳定性：
+
+```yaml
+replicas: 1
+```
+
+使用节点选择器将 Pod 调度到 OCI ARM 节点：
+
+```yaml
+nodeSelector:
+  kubernetes.io/hostname: free-arm-vm
+```
+
+如果集群实际节点标签不是这个值，应先读取节点标签再调整清单，不能凭主机显示名猜测标签。
+
+建议的初始资源配置：
+
+```yaml
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi
+```
+
+这些数值是第一轮运行基线，后续根据启动占用、并发量、请求延迟和节点余量调整。
+
+Deployment 需要完成以下注入：
+
+- 挂载 ConfigMap 中的 `config.yaml`。
+- 从 Secret 注入 `OPENAI_API_KEY_FREE_1`。
+- 从 Secret 注入 `LITELLM_MASTER_KEY`。
+- 从 Secret 注入 `REDIS_PASSWORD`。
+- 设置 `REDIS_HOST` 和 `REDIS_PORT`。
+- 设置 `NO_PROXY`，至少包含集群内部地址和 Redis Service 地址。
+
+不使用以下配置：
+
+- `hostNetwork: true`。
+- `hostPort`。
+- NodePort。
+- 将 Secret 直接写进 Deployment YAML。
+
+## 8. Service 设计
+
+LiteLLM 只创建 ClusterIP Service：
+
+```text
+Service: litellm
+Namespace: llm-system
+Port: 4000
+TargetPort: 4000
+Type: ClusterIP
+```
+
+ClusterIP 只允许集群内部访问，外部访问统一交给现有 Kong/KIC。这样可以避免直接暴露节点端口，也避免为 LiteLLM 再部署一套网关。
+
+## 9. 健康检查策略
+
+LiteLLM 的 `/health` 在当前环境中可能触发认证和管理数据库检查。此前没有配置 Prisma 管理数据库时，访问该路径出现过：
+
+```text
+No connected db.
+ModuleNotFoundError: No module named 'prisma'
+```
+
+因此不能未经验证就把 `/health` 当作 Kubernetes 探针。
+
+实施顺序建议如下：
+
+1. 先确认当前 LiteLLM 版本支持的轻量存活和就绪路径，例如 `/health/liveliness`、`/health/readiness`。
+2. 使用不依赖管理数据库的路径配置 HTTP 探针。
+3. 如果当前版本的 HTTP 路径都会触发鉴权，则第一版使用 TCP 探针检查 `4000` 端口，同时通过外部测试验证业务接口。
+4. 探针请求是否需要 `LITELLM_MASTER_KEY`，必须在本地用相同版本实际验证后再写入清单。
+
+探针的目的不同：
+
+- liveness：进程是否仍然存活。
+- readiness：Pod 是否可以接收流量。
+- 业务验收：是否能通过 `/v1/models` 和 `/v1/chat/completions` 完成真实调用。
+
+## 10. Kong/KIC 接入方案
+
+LiteLLM 部署并在集群内验证成功后，再通过现有 Kong/KIC 增加 HTTPRoute 或 Ingress：
+
+```text
+外部客户端
+    |
+    | HTTPS
+    v
+现有 Kong Gateway
+    |
+    v
+HTTPRoute/Ingress
+    |
+    v
+litellm.llm-system.svc.cluster.local:4000
+```
+
+路由设计需要明确：
+
+- 使用独立域名或明确的路径前缀。
+- TLS 终止位置和证书来源。
+- 是否保留 `/v1` 路径。
+- Kong 的超时设置必须覆盖 Gemini 的正常响应时间。
+- 客户端仍然通过 `LITELLM_MASTER_KEY` 鉴权。
+
+不通过 Kong 暴露 Redis，不创建 Redis 公网入口，也不把 LiteLLM 的管理接口无保护地暴露给同事或公网。
+
+## 11. ArgoCD 发布顺序
+
+建议按以下顺序操作：
+
+### 阶段 A：镜像和清单准备
+
+1. 编写 ARM64 或多架构 Dockerfile。
+2. 本地构建镜像并启动容器验证 LiteLLM。
+3. 将镜像推送到可被 K3s 节点访问的镜像仓库。
+4. 完成 Namespace、ConfigMap、Secret 引用、Deployment 和 Service 清单。
+5. 用 `kubectl apply --dry-run=client` 和 YAML 校验检查清单。
+
+阶段 A 交付物：
+
+- [ ] 可审查的 `Dockerfile` 和 `.dockerignore`。
+- [ ] 已构建并推送的 ARM64 或多架构镜像。
+- [ ] 镜像完整地址、版本标签和构建记录。
+- [ ] `deploy/k8s/` 下的 Namespace、ConfigMap、Deployment、Service 和 Kong 路由清单。
+- [ ] Secret 字段清单和安全创建说明。
+- [ ] Kubernetes YAML 静态校验结果。
+
+### 阶段 B：集群内最小闭环
+
+1. 创建 `llm-system` Namespace。
+2. 通过安全流程创建 Secret。
+3. 部署 ConfigMap、Deployment 和 ClusterIP Service。
+4. 确认 Pod 调度到 `free-arm-vm`。
+5. 确认容器启动日志没有依赖缺失或配置解析错误。
+6. 从集群内临时测试 Pod 调用 LiteLLM。
+7. 验证 Redis `AUTH`、`PING` 和缓存读写。
+
+阶段 B 交付物：
+
+- [ ] 已创建的 `llm-system` Namespace。
+- [ ] Secret 创建结果；输出中不得包含 Secret 明文。
+- [ ] LiteLLM Deployment 和 ClusterIP Service 的运行状态记录。
+- [ ] Pod 调度节点、镜像版本和启动日志记录。
+- [ ] 集群内 `/v1/models` 测试结果。
+- [ ] 集群内 `/v1/chat/completions` 测试结果。
+
+### 阶段 C：Kong 接入
+
+1. 先以内部或受限域名创建路由。
+2. 验证 HTTPS、鉴权、超时和错误码透传。
+3. 验证 `/v1/models`。
+4. 验证 `/v1/chat/completions`。
+5. 再决定是否开放给非 Tailscale 同事访问。
+
+阶段 C 交付物：
+
+- [ ] HTTPRoute 或 Ingress 清单。
+- [ ] 域名、TLS 证书和 Kong upstream 配置记录。
+- [ ] 外部 `/v1/models` 测试结果。
+- [ ] 外部 `/v1/chat/completions` 测试结果。
+- [ ] 401、429、5xx、超时等错误路径测试记录。
+- [ ] Redis 未被 Kong 暴露公网的检查结果。
+
+### 阶段 D：ArgoCD 纳管
+
+1. 将清单放入 GitOps 清单仓库或项目约定的部署目录。
+2. 创建 ArgoCD Application。
+3. 首次同步采用人工确认，观察 Pod、Service 和路由状态。
+4. 验证稳定后再启用 `automated sync` 和 `selfHeal`。
+5. `prune` 必须经过确认，避免误删现有 Redis、Kong 或其他共享资源。
+
+阶段 D 交付物：
+
+- [ ] ArgoCD Application YAML。
+- [ ] Application 对应的 Git 仓库、路径和 revision 记录。
+- [ ] 首次人工同步结果。
+- [ ] `Synced`、`Healthy` 状态截图或命令输出。
+- [ ] Pod 删除后由 Deployment 恢复的记录。
+- [ ] 镜像回滚或 Git revision 回滚的演练记录。
+- [ ] automated sync、selfHeal 和 prune 的最终启用配置及审批记录。
+
+## 12. 验收清单
+
+### 12.1 调度和启动
+
+- [ ] `free-arm-vm` 节点状态为 Ready。
+- [ ] LiteLLM Pod 使用 ARM64 镜像并成功启动。
+- [ ] Pod 实际调度在 `free-arm-vm`。
+- [ ] `litellm[proxy]` 所需依赖完整。
+- [ ] ConfigMap 和 Secret 已正确注入。
+- [ ] 日志通过 stdout/stderr 输出，没有泄露 API Key。
+
+### 12.2 模型接口
+
+- [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/models` 返回模型列表。
+- [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/chat/completions` 返回标准 OpenAI 格式。
+- [ ] 返回中的 `model` 为 `gemini-3.6-flash-freelayer`。
+- [ ] Gemini 429、5xx 和超时能够被日志识别。
+- [ ] 失败时不会把 Gemini Provider Key 返回给客户端。
+
+### 12.3 Redis 缓存
+
+- [ ] LiteLLM Pod 能通过集群内 Redis Service DNS 连接 Redis。
+- [ ] Redis `AUTH` 和 `PING` 成功。
+- [ ] 相同请求在 TTL 内可以命中精确缓存。
+- [ ] 修改 prompt、模型或影响响应的参数后不会错误复用旧响应。
+- [ ] Redis `6379` 没有被新增公网暴露。
+
+### 12.4 外部入口与运维
+
+- [ ] Kong HTTPS 路由能够到达 LiteLLM ClusterIP Service。
+- [ ] TLS、超时和鉴权配置符合预期。
+- [ ] ArgoCD 显示 Synced 和 Healthy。
+- [ ] 删除或重启 Pod 后能够按预期恢复。
+- [ ] 发生错误时可以通过 `kubectl logs` 和 Kong 日志定位问题。
+
+## 13. 失败处理与回滚
+
+### 13.1 常见故障判断
+
+- `ImagePullBackOff`：检查镜像仓库权限、标签和 ARM64 manifest。
+- `CrashLoopBackOff`：检查 LiteLLM proxy 依赖、FastAPI/LiteLLM 版本兼容性和配置文件挂载。
+- Redis 连接超时：检查 Service DNS、端口、密码、NetworkPolicy 和 Pod 出网/集群网络。
+- Gemini 请求超时：检查节点 DNS、HTTPS 出站、防火墙和代理配置。
+- `/health` 返回 `No connected db`：确认是否误用了需要 Prisma 管理数据库的路径，不要立即把 MySQL 引入第一阶段。
+- Kong 返回 401：检查客户端是否发送 `LITELLM_MASTER_KEY`，以及 Kong 是否改写或丢失 Authorization Header。
+- Kong 返回 502/504：检查 Service selector、targetPort、Kong upstream timeout 和 LiteLLM 日志。
+
+### 13.2 回滚步骤
+
+1. 先移除或禁用 Kong 路由，停止外部流量进入。
+2. 将 Deployment 镜像回滚到上一个已验证版本。
+3. 如果 ArgoCD 自动同步造成反复回滚，暂时暂停 automated sync。
+4. 保留 Pod、Kong 和 ArgoCD 日志用于排查。
+5. 不删除现有 Redis Pod、Redis 数据卷或共享 Kong 资源。
+
+## 14. 后续阶段
+
+第一阶段闭环稳定后，再分别规划：
+
+1. LiteLLM 请求日志和费用数据写入 OCI MySQL。
+2. FastAPI Service B 的评测接口。
+3. 多模型路由、重试和 fallback。
+4. API Key 分级、预算和速率限制。
+5. Prometheus 指标、集中式日志和告警。
+6. 多副本部署与滚动升级。
+
+这些功能会增加 Secret、数据库、权限和运维复杂度，不应与第一次 LiteLLM 上线绑定实施。
+
+## 15. 本计划的实施前置确认
+
+真正执行部署前，需要确认以下事实：
+
+- K3s 当前上下文和目标 Namespace。
+- `free-arm-vm` 的实际节点标签。
+- Redis Service 的准确名称、Namespace、端口和认证方式。
+- K3s 节点能否直接访问 Gemini API。
+- 镜像仓库地址以及 ARM64 拉取权限。
+- 现有 Kong/KIC 使用 Ingress 还是 Gateway API HTTPRoute。
+- 外部访问使用的域名、TLS 证书和访问范围。
+- Secret 的正式交付方式。
+
+以上确认完成后，才进入 Dockerfile、Kubernetes manifest 和 ArgoCD Application 的实际编写与部署阶段。
