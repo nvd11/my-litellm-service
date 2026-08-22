@@ -42,11 +42,11 @@
 | 阶段 | 实施目标 | 必须交付的成果 | 阶段完成标准 |
 | --- | --- | --- | --- |
 | 0. 环境确认 | 确认目标节点、Redis、Kong、镜像仓库和 Secret 方案 | 环境确认记录、节点标签、Redis Service 信息、Kong 接入方式记录 | 所有部署前置事实已确认，没有依赖猜测值 |
-| 1. 容器化 | 构建可在 ARM64 节点运行的 LiteLLM 镜像 | `Dockerfile`、`.dockerignore`、镜像标签、镜像构建记录 | 容器能够启动并读取配置，镜像不包含真实密钥 |
-| 2. Kubernetes 基础部署 | 在集群内启动 LiteLLM | Namespace、ConfigMap、Secret 创建记录、Deployment、ClusterIP Service | Pod 在 `free-arm-vm` Running，集群内 API 调用成功 |
+| 1. Helm Chart、容器化与 GitOps 清单准备 | 创建通用服务 Chart v2，构建镜像并准备 LiteLLM 的 ArgoCD Application | `generic-web-service-v2`、`Dockerfile`、`.dockerignore`、GitHub Actions workflow、镜像标签、`argocd-apps/litellm-svc-app.yaml`、构建记录 | Chart 能渲染 LiteLLM 所需资源，容器能够启动，GitOps 清单能指向有效镜像，CI 构建成功 |
+| 2. ArgoCD 首次同步与集群内闭环 | 通过 ArgoCD 首次部署 LiteLLM 并完成内部验证 | Namespace、ConfigMap、Secret 创建记录、Application 首次同步记录、集群内测试记录 | Pod 在 `free-arm-vm` Running，集群内 API 调用成功 |
 | 3. Redis 联调 | 验证缓存和 Redis 网络连接 | Redis 连接测试记录、重复请求缓存测试记录 | `AUTH`、`PING`、缓存命中均成功，Redis 未暴露公网 |
 | 4. Kong 接入 | 通过现有网关提供外部 HTTPS API | HTTPRoute/Ingress、TLS 配置、路由测试记录 | 外部请求经过 Kong 成功到达 LiteLLM |
-| 5. ArgoCD 纳管 | 建立 GitOps 发布和恢复能力 | ArgoCD Application、同步记录、回滚记录 | Application 显示 `Synced` 和 `Healthy` |
+| 5. ArgoCD 自动发布与回滚 | 验证后续 Git commit 自动发布、自愈和回滚 | 自动同步记录、自愈记录、回滚记录 | Application 持续显示 `Synced` 和 `Healthy` |
 
 后续章节分别说明每个阶段需要编写的文件、执行的动作和验收证据。
 
@@ -80,6 +80,9 @@ Repo: my-argocd-manifests
 | --- | --- | --- | --- |
 | Dockerfile | `nvd11/my-litellm-service` | `/Dockerfile` | 否 |
 | Docker 构建排除规则 | `nvd11/my-litellm-service` | `/.dockerignore` | 否 |
+| GitHub Actions 镜像工作流 | `nvd11/my-litellm-service` | `/.github/workflows/build-and-push-image.yaml` | 否；只引用 GitHub Actions Secrets |
+| 通用服务 Helm Chart v2 | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/` | 否 |
+| Helm Chart v2 发布版本 | `nvd11/my-shared-helm-charts` | Git tag，例如 `v2.0.0` | 否 |
 | Python 依赖和版本约束 | `nvd11/my-litellm-service` | `/pyproject.toml`、`/uv.lock` | 否；锁文件只记录依赖版本 |
 | LiteLLM 模型配置 | `nvd11/my-litellm-service` | `/config.yaml` | 否；只使用 `os.environ/...` 引用 |
 | 环境变量模板 | `nvd11/my-litellm-service` | `/.env.example` | 否；只使用占位值 |
@@ -90,13 +93,13 @@ Repo: my-argocd-manifests
 | LiteLLM ClusterIP Service | `nvd11/my-litellm-service` | `/deploy/k8s/litellm-service.yaml` | 否 |
 | Kong HTTPRoute/Ingress | `nvd11/my-litellm-service` | `/deploy/k8s/kong-route.yaml` | 否；TLS 私钥不提交 |
 | Secret 实例 | 集群 Secret 管理系统 | Namespace `llm-system` 中的 Secret，例如 `litellm-secrets` | 不进入 Git；由安全流程创建 |
-| ARM64/多架构容器镜像 | 容器镜像仓库 | `<registry>/<repository>:<git-sha>` | 不包含 API Key |
+| ARM64/多架构容器镜像 | GHCR public package | `ghcr.io/nvd11/my-litellm-svc:<git-sha>` | 不包含 API Key |
 | 镜像构建记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/01-image-build.md` | 否 |
 | 环境确认记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/00-environment.md` | 不记录密码和完整密钥 |
 | 集群内部署验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/02-in-cluster-validation.md` | 否；脱敏命令输出 |
 | Redis 缓存验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/03-redis-cache.md` | 否；不记录密码 |
 | Kong 外部访问验证 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/04-kong-validation.md` | 否；请求头中的 Key 必须脱敏 |
-| ArgoCD Application | `my-argocd-manifests` | `<argocd-manifests-path>/applications/my-litellm-service.yaml` | 否；不内嵌 Secret |
+| ArgoCD Application | `my-argocd-manifests` | `argocd-apps/litellm-svc-app.yaml` | 否；不内嵌 Secret |
 | ArgoCD 同步与回滚记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/05-argocd-release.md` | 否 |
 | 本部署计划 | `nvd11/my-litellm-service` | `/docs/plans/05_litellm_oci_free_vm_deployment.md` | 否 |
 
@@ -114,9 +117,63 @@ nvd11/my-litellm-service
 
 my-argocd-manifests
 └── ArgoCD Application 注册文件
+
+my-shared-helm-charts
+└── charts/generic-web-service-v2/ LiteLLM 使用的通用服务 Chart
 ```
 
 应用 Repo 的 Kubernetes 清单负责描述 LiteLLM 如何运行；GitOps Repo 的 ArgoCD Application 负责描述 ArgoCD 从哪个 Repo、哪个 revision、哪个路径同步这些清单。两者不能混成一个文件，也不能把生产 Secret 复制到任一普通 Git Repo。
+
+## 3.1 创建 `generic-web-service-v2` Helm Chart
+
+现有 `generic-web-service` Chart 已经被其他服务使用，不能为了 LiteLLM 直接修改其行为。本项目新增独立的 v2 Chart，保持 v1 兼容不变。
+
+交付位置：
+
+```text
+Repo: nvd11/my-shared-helm-charts
+Path: charts/generic-web-service-v2/
+Release: v2.0.0
+```
+
+建议目录：
+
+```text
+charts/generic-web-service-v2/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── deployment.yaml
+    ├── service.yaml
+    └── httproute.yaml
+```
+
+v2 至少需要支持：
+
+- `image.repository`、`image.tag`、`image.pullPolicy`。
+- `command` 和 `args`。
+- `env` 和 `envFrom`，用于注入 Kubernetes Secret。
+- `volumes` 和 `volumeMounts`，用于挂载 LiteLLM `config.yaml`。
+- `resources`。
+- `securityContext`。
+- `nodeSelector`。
+- HTTP 探针和 TCP 探针二选一配置。
+- 可选的 `imagePullSecrets`；LiteLLM 第一阶段使用 public GHCR 镜像，不需要配置拉取 Secret。
+- ClusterIP Service。
+- Kong HTTPRoute 和可配置的 `stripPath`。
+
+v2 不应写入 LiteLLM 专用逻辑，仍然保持通用服务 Chart 的定位。LiteLLM 的模型、Redis 和 API Key 配置由 `litellm-svc-app.yaml` 通过 values、ConfigMap 和 Secret 引用提供。
+
+LiteLLM 的 ArgoCD Application 使用 v2 Chart：
+
+```yaml
+source:
+  repoURL: https://github.com/nvd11/my-shared-helm-charts.git
+  path: charts/generic-web-service-v2
+  targetRevision: v2.0.0
+```
+
+v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 文件验证渲染结果。未发布并验证 v2 之前，不进入 LiteLLM 的首次 ArgoCD Bootstrap。
 
 ## 3. 需要新增或整理的仓库内容
 
@@ -131,6 +188,10 @@ deploy/
     ├── litellm-deployment.yaml
     ├── litellm-service.yaml
     └── kong-route.yaml
+
+.github/
+└── workflows/
+    └── build-and-push-image.yaml
 ```
 
 根目录还需要增加面向 ARM64 的 `Dockerfile`。真实密钥只进入 Kubernetes Secret 或外部 Secret 管理系统，不进入 Git，也不写入镜像层。
@@ -139,6 +200,7 @@ deploy/
 
 - [ ] `Dockerfile`。
 - [ ] `.dockerignore`。
+- [ ] `.github/workflows/build-and-push-image.yaml`。
 - [ ] `deploy/k8s/namespace.yaml`。
 - [ ] `deploy/k8s/configmap.yaml`。
 - [ ] `deploy/k8s/secret.example.yaml`。
@@ -148,6 +210,39 @@ deploy/
 - [ ] 一份不包含真实凭证的部署说明。
 
 ## 4. 容器镜像方案
+
+### 4.0 镜像名称
+
+LiteLLM 生产镜像名称固定为：
+
+```text
+ghcr.io/nvd11/my-litellm-svc
+```
+
+该 GHCR Container Package 固定发布为 **public**。因此 `free-arm-vm` 上的 K3s 节点可以匿名拉取镜像，第一阶段不创建 GHCR `imagePullSecret`。
+
+public 只表示镜像层可以被公开拉取，不表示运行时配置公开。以下内容仍然禁止写入 Dockerfile、镜像层、GitHub Actions 日志或任何 Git Repo：
+
+```text
+OPENAI_API_KEY_FREE_1
+LITELLM_MASTER_KEY
+REDIS_PASSWORD
+```
+
+这些值继续通过 Kubernetes Secret 注入 Pod。
+
+版本使用 Git commit SHA 作为不可变 tag，例如：
+
+```text
+ghcr.io/nvd11/my-litellm-svc:<git-commit-sha>
+```
+
+该名称必须在以下位置保持一致：
+
+- Docker build 和 push workflow。
+- `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 的 `image.repository`。
+- GitHub Actions 触发 `update-image-tag.yml` 时的镜像发布记录。
+- 集群内和 Kong 外部访问验收记录。
 
 ### 4.1 运行环境
 
@@ -172,7 +267,182 @@ LiteLLM 需要 proxy extra 中的依赖。之前本地启动时缺少 `backoff`�
 
 部署清单中的镜像标签必须是不可变版本标签，例如 Git commit SHA，不使用长期漂移的 `latest`。
 
-### 4.3 日志策略
+### 4.3 GitHub Actions 镜像构建与推送
+
+GitHub Actions 负责把代码构建成容器镜像并推送到镜像仓库，但不直接连接 K3s，也不绕过 ArgoCD 修改集群。Workflow 文件位于：
+
+```text
+Repo: nvd11/my-litellm-service
+Path: /.github/workflows/build-and-push-image.yaml
+```
+
+Workflow 至少应包含以下步骤：
+
+1. 在 `push` 到主分支、发布 tag 或手动触发时运行；具体触发策略在正式实施前确定。
+2. Checkout 当前 commit。
+3. 设置 Docker Buildx。
+4. 登录镜像仓库。
+5. 构建 `linux/arm64` 镜像；如果镜像仓库和发布策略允许，也可以同时构建 `linux/amd64`。
+6. 使用 Git commit SHA 生成不可变镜像标签，例如：
+
+```text
+ghcr.io/nvd11/my-litellm-svc:<git-sha>
+```
+
+7. 推送镜像并生成构建摘要。
+8. 首次 Bootstrap 完成后，后续版本在镜像推送成功时，通过 GitHub API 向 `nvd11/my-argocd-manifests` 发送 `repository_dispatch` 事件。
+9. 将镜像地址和 commit SHA 写入构建记录，供 Kubernetes Deployment 或后续 ArgoCD 更新使用。
+
+#### 4.3.1 首次部署 Bootstrap
+
+首次部署不能直接调用 `update-image-tag.yml`，因为该 workflow 只会修改已经存在的：
+
+```text
+my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
+```
+
+因此第一次部署必须先创建这个 ArgoCD Application 清单，并为它提供一个已经存在于 GHCR 的初始镜像 tag。
+
+首次部署顺序：
+
+```text
+创建并发布 generic-web-service-v2 Chart
+    ↓
+编写 Dockerfile 和 CI workflow
+    ↓
+构建并推送第一版 LiteLLM 镜像到 GHCR
+    ↓
+在 my-argocd-manifests 创建 litellm-svc-app.yaml
+    ↓
+填入第一版镜像的 repository 和 tag
+    ↓
+提交 Git commit
+    ↓
+ArgoCD 首次发现并同步 Application
+    ↓
+集群内验证 LiteLLM
+```
+
+首次 Bootstrap 的交付物：
+
+- [ ] 第一版已推送到 GHCR 的 LiteLLM ARM64 或多架构镜像。
+- [ ] GHCR Package visibility 已确认是 `public`。
+- [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
+- [ ] Application 中的 `image.repository` 和 `image.tag` 指向真实存在的镜像。
+- [ ] ArgoCD 首次同步记录。
+- [ ] 集群内 LiteLLM API 验证记录。
+
+首次镜像发布时有两种实现方式：
+
+1. 首次 CI 构建只负责 push 镜像，不触发 `repository_dispatch`；Application 创建并首次同步后，后续构建才触发自动更新。
+2. 先手工创建一个包含初始镜像 tag 的 Application，再启用完整的 CI dispatch 流程。
+
+推荐使用第一种方式，并在 CI 中增加 Bootstrap 标志或人工审批，避免在 Application 尚不存在时调用 Tag 更新 workflow。
+
+#### 4.3.2 后续版本触发 ArgoCD 镜像 Tag 更新 workflow
+
+镜像推送成功后，当前应用 Repo 的 CI 必须调用：
+
+```text
+Repo: nvd11/my-argocd-manifests
+Workflow: .github/workflows/update-image-tag.yml
+Event: repository_dispatch
+Event type: update-image-tag
+```
+
+调用时发送以下 payload：
+
+```json
+{
+  "event_type": "update-image-tag",
+  "client_payload": {
+    "svc_name": "litellm-svc",
+    "image_tag": "<git-commit-sha>"
+  }
+}
+```
+
+参数含义：
+
+- `svc_name` 必须与 GitOps Repo 中的 ArgoCD Application 文件名对应。`litellm-svc` 会让 workflow 修改：
+
+  ```text
+  nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
+  ```
+
+- `image_tag` 必须是已经成功推送到 GHCR 的镜像 tag，推荐使用当前 Git commit SHA。
+
+调用 API 的目标地址为：
+
+```text
+POST https://api.github.com/repos/nvd11/my-argocd-manifests/dispatches
+```
+
+GitHub Actions 需要使用能够向 `my-argocd-manifests` 发送 repository dispatch 的凭证。该凭证只保存在当前 Repo 的 GitHub Actions Secrets 中，例如：
+
+```text
+ARGOCD_MANIFESTS_DISPATCH_TOKEN
+```
+
+Token 不得写入 workflow 文件、Dockerfile、项目 `.env` 或镜像。Token 只需要具备目标 Repo 所需的最小权限；如果组织策略支持，优先使用 GitHub App 或细粒度 token，而不是个人长期 token。
+
+触发步骤必须放在镜像 push 成功之后：
+
+```text
+构建镜像
+    ↓
+推送 GHCR
+    ↓ 只有 push 成功才继续
+调用 repository_dispatch
+    ↓
+update-image-tag.yml 修改 GitOps Repo 中的 image.tag
+    ↓
+commit + push
+    ↓
+ArgoCD 同步部署
+```
+
+如果镜像 push 失败，不能触发 Tag 更新；如果 `repository_dispatch` 调用失败，当前 CI 必须失败并保留 API 响应，不能报告为成功。这样可以避免 GitOps 清单指向一个实际不存在的镜像。
+
+GitHub Actions 中可以使用官方 API 或专门的 `repository_dispatch` Action 实现调用。无论采用哪种实现，都必须在构建日志中记录以下非敏感信息：
+
+- 目标 Repo。
+- event type。
+- `svc_name`。
+- `image_tag`。
+- API 调用 HTTP 状态。
+
+不得记录 dispatch token、完整 Authorization Header 或其他运行时密钥。
+
+GitHub Actions 只通过 GitHub Actions Secrets 读取镜像仓库凭证，例如：
+
+```text
+REGISTRY_USERNAME
+REGISTRY_PASSWORD 或 REGISTRY_TOKEN
+```
+
+Workflow 不得读取或打印以下运行时 Secret：
+
+```text
+OPENAI_API_KEY_FREE_1
+LITELLM_MASTER_KEY
+REDIS_PASSWORD
+```
+
+如果使用 GitHub Container Registry，优先使用短生命周期的 `GITHUB_TOKEN` 和最小权限；如果使用其他镜像仓库，则只授予推送目标仓库所需的权限。Workflow 中应设置最小化的 `permissions`，不使用不必要的仓库写权限。
+
+GitHub Actions 阶段的交付物为：
+
+- [ ] `/.github/workflows/build-and-push-image.yaml`。
+- [ ] 镜像仓库地址和仓库权限配置记录。
+- [ ] GitHub Actions Secrets 名称清单，不包含 Secret 值。
+- [ ] 一次成功的 ARM64 或多架构构建记录。
+- [ ] 推送后的不可变镜像地址和 commit SHA。
+- [ ] 成功调用 `repository_dispatch` 的记录。
+- [ ] `svc_name`、`image_tag` 和目标 manifest 文件对应关系的验证记录。
+- [ ] 镜像可以被 `free-arm-vm` 节点拉取的验证记录。
+
+### 4.4 日志策略
 
 Kubernetes 中优先让 LiteLLM、Uvicorn 和应用日志输出到 stdout/stderr，由 Kubernetes 日志系统采集：
 
@@ -192,7 +462,32 @@ llm-system
 
 ### 5.1 ConfigMap 中保存非敏感配置
 
-ConfigMap 可以保存 LiteLLM 配置文件或其非敏感部分，例如：
+LiteLLM 的非敏感配置通过 ConfigMap 管理。建议的 ConfigMap 内容为：
+
+```text
+config.yaml
+REDIS_HOST
+REDIS_PORT
+LITELLM_PORT
+NO_PROXY
+```
+
+配置值为：
+
+```text
+REDIS_HOST=redis.redis.svc.cluster.local
+REDIS_PORT=6379
+LITELLM_PORT=4000
+NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,.svc,.cluster.local
+```
+
+`config.yaml` 挂载到容器：
+
+```text
+/app/config/config.yaml
+```
+
+它可以保存以下非敏感内容：
 
 - 暴露端口 `4000`。
 - 模型别名 `gemini-3.6-flash-freelayer`。
@@ -202,9 +497,17 @@ ConfigMap 可以保存 LiteLLM 配置文件或其非敏感部分，例如：
 
 当前项目的 `config.yaml` 使用 `os.environ/...` 读取密钥，因此配置文件本身不应包含真实 API Key 或密码。
 
-### 5.2 Secret 中保存敏感配置
+OCI `free-arm-vm` 已确认可以通过 IPv4 直连 Gemini API，因此第一阶段不配置：
 
-至少需要注入以下三个变量：
+```text
+HTTP_PROXY
+HTTPS_PROXY
+ALL_PROXY
+```
+
+### 5.2 Secret Manager 中保存敏感配置
+
+以下变量必须通过 Kubernetes Secret、SealedSecret 或 External Secret Manager 注入：
 
 ```text
 OPENAI_API_KEY_FREE_1
@@ -212,14 +515,45 @@ LITELLM_MASTER_KEY
 REDIS_PASSWORD
 ```
 
-两类 API Key 的职责不同，不能混用：
+职责分别是：
 
 ```text
-客户端 -> LiteLLM：Authorization: Bearer <LITELLM_MASTER_KEY>
-LiteLLM -> Gemini：OPENAI_API_KEY_FREE_1
+OPENAI_API_KEY_FREE_1  LiteLLM -> Gemini
+LITELLM_MASTER_KEY     客户端 -> LiteLLM
+REDIS_PASSWORD         LiteLLM -> Redis
 ```
 
-`secret.example.yaml` 只提供字段示例或生成命令，不放真实值。生产环境应通过 SealedSecret、External Secrets 或集群外的安全交付流程创建 Secret。
+这些值不能进入 ConfigMap、Dockerfile、镜像、Git Repo 或 GitHub Actions 日志。
+
+### 5.3 GitHub Actions Secrets
+
+GitHub Actions 使用的 Secret 与 Kubernetes 运行时 Secret 分开管理：
+
+```text
+ARGOCD_MANIFESTS_DISPATCH_TOKEN
+GITHUB_TOKEN
+```
+
+`ARGOCD_MANIFESTS_DISPATCH_TOKEN` 用于触发 `my-argocd-manifests` Repo 的 `repository_dispatch`。`GITHUB_TOKEN` 用于向 public GHCR 推送 `my-litellm-svc` 镜像，具体权限由 workflow 的 `permissions` 控制。
+
+由于 GHCR 镜像是 public，第一阶段不创建 Kubernetes `imagePullSecret`。
+
+### 5.4 Phase 1 暂不注入的变量
+
+以下变量属于后续 MySQL 审计、FastAPI Service B 或 Vertex AI 方案，第一阶段不注入 LiteLLM Pod：
+
+```text
+MYSQL_HOST
+MYSQL_PORT
+MYSQL_USER
+MYSQL_PASSWORD
+MYSQL_DB
+FASTAPI_PORT
+GCP_PROJECT_ID
+GCP_REGION
+VERTEXAI_PROJECT
+VERTEXAI_LOCATION
+```
 
 ## 6. LiteLLM 配置与 Redis 地址
 
@@ -374,35 +708,55 @@ litellm.llm-system.svc.cluster.local:4000
 
 ### 阶段 A：镜像和清单准备
 
-1. 编写 ARM64 或多架构 Dockerfile。
-2. 本地构建镜像并启动容器验证 LiteLLM。
-3. 将镜像推送到可被 K3s 节点访问的镜像仓库。
-4. 完成 Namespace、ConfigMap、Secret 引用、Deployment 和 Service 清单。
-5. 用 `kubectl apply --dry-run=client` 和 YAML 校验检查清单。
+1. 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
+2. 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
+3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
+4. 编写 ARM64 或多架构 Dockerfile。
+5. 编写 `.github/workflows/build-and-push-image.yaml`。
+6. 本地构建镜像并启动容器验证 LiteLLM。
+7. 通过 GitHub Actions 构建并推送第一版镜像；首次 Bootstrap 不调用 `repository_dispatch`。
+8. 将第一版镜像推送到可被 K3s 节点访问的 GHCR 仓库。
+9. 完成 Namespace、ConfigMap、Secret 引用、Deployment 和 Service values 清单。
+10. 在 `my-argocd-manifests` Repo 中创建 LiteLLM 的 ArgoCD Application：
+
+   ```text
+   my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
+   ```
+
+   该文件至少需要定义镜像 Repository、初始 image tag、Helm Chart 来源、目标集群、Namespace、Service 参数和 Kong 路由参数。初始 `image.tag` 必须使用一个已经存在于 GHCR 的镜像 tag，不能使用尚未推送的值。
+
+11. 确认 `svc_name=litellm-svc` 会映射到该文件，使 `update-image-tag.yml` 能够正确更新它。
+12. 用 `helm template`、YAML 校验和 ArgoCD manifest 检查清单。
 
 阶段 A 交付物：
 
 - [ ] 可审查的 `Dockerfile` 和 `.dockerignore`。
+- [ ] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
+- [ ] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
 - [ ] 已构建并推送的 ARM64 或多架构镜像。
 - [ ] 镜像完整地址、版本标签和构建记录。
 - [ ] `deploy/k8s/` 下的 Namespace、ConfigMap、Deployment、Service 和 Kong 路由清单。
+- [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
+- [ ] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
 - [ ] Secret 字段清单和安全创建说明。
 - [ ] Kubernetes YAML 静态校验结果。
 
-### 阶段 B：集群内最小闭环
+### 阶段 B：ArgoCD 首次同步与集群内最小闭环
 
-1. 创建 `llm-system` Namespace。
-2. 通过安全流程创建 Secret。
-3. 部署 ConfigMap、Deployment 和 ClusterIP Service。
-4. 确认 Pod 调度到 `free-arm-vm`。
-5. 确认容器启动日志没有依赖缺失或配置解析错误。
-6. 从集群内临时测试 Pod 调用 LiteLLM。
-7. 验证 Redis `AUTH`、`PING` 和缓存读写。
+1. 通过安全流程创建 `llm-system` Namespace 和 Secret。
+2. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
+3. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
+4. 首次以人工确认方式同步 ArgoCD Application。
+5. 确认 Pod 调度到 `free-arm-vm`。
+6. 确认容器启动日志没有依赖缺失或配置解析错误。
+7. 从集群内临时测试 Pod 调用 LiteLLM。
+8. 验证 Redis `AUTH`、`PING` 和缓存读写。
 
 阶段 B 交付物：
 
 - [ ] 已创建的 `llm-system` Namespace。
 - [ ] Secret 创建结果；输出中不得包含 Secret 明文。
+- [ ] ArgoCD Application 首次发现和同步记录。
 - [ ] LiteLLM Deployment 和 ClusterIP Service 的运行状态记录。
 - [ ] Pod 调度节点、镜像版本和启动日志记录。
 - [ ] 集群内 `/v1/models` 测试结果。
@@ -425,19 +779,20 @@ litellm.llm-system.svc.cluster.local:4000
 - [ ] 401、429、5xx、超时等错误路径测试记录。
 - [ ] Redis 未被 Kong 暴露公网的检查结果。
 
-### 阶段 D：ArgoCD 纳管
+### 阶段 D：ArgoCD 自动发布与回滚
 
-1. 将清单放入 GitOps 清单仓库或项目约定的部署目录。
-2. 创建 ArgoCD Application。
-3. 首次同步采用人工确认，观察 Pod、Service 和路由状态。
-4. 验证稳定后再启用 `automated sync` 和 `selfHeal`。
-5. `prune` 必须经过确认，避免误删现有 Redis、Kong 或其他共享资源。
+1. 确认阶段 B 的首次同步和集群内验证已经成功。
+2. 验证后续镜像构建能够调用 `repository_dispatch` 并更新 `image.tag`。
+3. 验证 ArgoCD 发现 Git commit 后自动同步新镜像。
+4. 验证 `automated sync` 和 `selfHeal`。
+5. 演练镜像回滚或 Git revision 回滚。
+6. `prune` 必须经过确认，避免误删现有 Redis、Kong 或其他共享资源。
 
 阶段 D 交付物：
 
-- [ ] ArgoCD Application YAML。
+- [ ] 后续 `repository_dispatch` 调用成功记录。
 - [ ] Application 对应的 Git 仓库、路径和 revision 记录。
-- [ ] 首次人工同步结果。
+- [ ] 新 image tag 触发的自动同步结果。
 - [ ] `Synced`、`Healthy` 状态截图或命令输出。
 - [ ] Pod 删除后由 Deployment 恢复的记录。
 - [ ] 镜像回滚或 Git revision 回滚的演练记录。
@@ -524,4 +879,4 @@ litellm.llm-system.svc.cluster.local:4000
 - 外部访问使用的域名、TLS 证书和访问范围。
 - Secret 的正式交付方式。
 
-以上确认完成后，才进入 Dockerfile、Kubernetes manifest 和 ArgoCD Application 的实际编写与部署阶段。
+以上确认完成后，才进入 generic-web-service-v2、Dockerfile、GitHub Actions 和 ArgoCD Application 的实际编写与部署阶段。
