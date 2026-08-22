@@ -12,6 +12,7 @@ import os
 
 import pytest
 from litellm import acompletion
+from litellm.exceptions import APIError, RateLimitError
 
 from app.core.config import get_settings
 
@@ -30,13 +31,21 @@ async def test_real_gemini_chat_completion() -> None:
 
     os.environ.setdefault("OPENAI_API_KEY_FREE_1", api_key)
 
-    response = await acompletion(
-        model="gemini/gemini-3.7-flash",
-        api_key=api_key,
-        messages=[{"role": "user", "content": "Reply with exactly: OK"}],
-        #max_tokens=64, # output token limit, the max of gemini is 64k
-        #timeout=30,
-    )
+    try:
+        response = await acompletion(
+            model="gemini/gemini-3.6-flash",
+            api_key=api_key,
+            messages=[{"role": "user", "content": "Reply with exactly: OK"}],
+            # max_tokens=64,  # Output token limit; Gemini's maximum is 64K.
+            # timeout=30,
+        )
+    except RateLimitError as error:
+        pytest.fail(f"Gemini returned HTTP 429 Rate Limit: {error}")
+    except APIError as error:
+        status_code = getattr(error, "status_code", None)
+        if status_code is not None and 500 <= status_code <= 599:
+            pytest.fail(f"Gemini returned HTTP {status_code} server error: {error}")
+        raise
 
     assert response.choices
     print(f"LLM response: {response.choices[0].message.content!r}")
