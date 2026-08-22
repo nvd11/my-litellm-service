@@ -13,10 +13,7 @@ def _env() -> dict[str, str]:
         "REDIS_HOST": "redis.example.internal",
         "REDIS_PORT": "6379",
         "REDIS_PASSWORD": "test-redis-password",
-        "OPENAI_API_KEY": "test-openai-key",
-        "ANTHROPIC_API_KEY": "test-anthropic-key",
-        "VERTEXAI_PROJECT": "test-project",
-        "VERTEXAI_LOCATION": "us-central1",
+        "OPENAI_API_KEY_FREE_1": "test-gemini-key",
         "LITELLM_MASTER_KEY": "test-master-key",
     }
 
@@ -54,4 +51,4 @@ def test_redacted_summary_does_not_expose_secrets(monkeypatch):
     summary = str(redacted_summary(Settings()))
     assert "test-mysql-password" not in summary
     assert "test-redis-password" not in summary
-    assert "test-openai-key" not in summary
+    assert "test-gemini-key" not in summary

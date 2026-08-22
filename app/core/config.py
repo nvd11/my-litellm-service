@@ -26,10 +26,7 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: SecretStr
 
-    openai_api_key: SecretStr
-    anthropic_api_key: SecretStr
-    vertexai_project: str
-    vertexai_location: str = "us-central1"
+    openai_api_key_free_1: SecretStr
 
     litellm_master_key: SecretStr
     litellm_port: int = 4000
@@ -53,7 +50,6 @@ class Settings(BaseSettings):
         "mysql_user",
         "mysql_db",
         "redis_host",
-        "vertexai_project",
     )
     @classmethod
     def validate_non_empty(cls, value: str) -> str:
@@ -82,4 +78,3 @@ def redacted_summary(settings: Settings) -> dict[str, object]:
         "fastapi_port": settings.fastapi_port,
         "secrets": "***",
     }
-

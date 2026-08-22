@@ -2,39 +2,10 @@
 # Secrets are resolved from environment variables and must not be committed.
 
 model_list:
-  - model_name: gpt-4o
+  - model_name: gemini-3.7-flash
     litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-
-  - model_name: gemini-1.5-pro
-    litellm_params:
-      model: vertex_ai/gemini-1.5-pro
-      vertex_project: os.environ/VERTEXAI_PROJECT
-      vertex_location: os.environ/VERTEXAI_LOCATION
-
-  - model_name: gemini-1.5-flash
-    litellm_params:
-      model: vertex_ai/gemini-1.5-flash
-      vertex_project: os.environ/VERTEXAI_PROJECT
-      vertex_location: os.environ/VERTEXAI_LOCATION
-
-  - model_name: claude-3-5-sonnet
-    litellm_params:
-      model: anthropic/claude-3-5-sonnet-20240620
-      api_key: os.environ/ANTHROPIC_API_KEY
-
-router_settings:
-  fallbacks:
-    - gpt-4o: [gemini-1.5-pro, gemini-1.5-flash, gpt-4o-mini, claude-3-5-sonnet]
-  allowed_fails: 2
-  cooldown_time: 30
-  num_retries: 1
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
 
 litellm_settings:
   cache: true
@@ -45,4 +16,3 @@ litellm_settings:
     password: os.environ/REDIS_PASSWORD
     supported_call_types: [chat_completion]
     ttl: 3600
-

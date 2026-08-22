@@ -12,9 +12,7 @@ def _settings() -> Settings:
         mysql_db="litellm_test",
         redis_host="redis.example.internal",
         redis_password="redis-password",
-        openai_api_key="openai-key",
-        anthropic_api_key="anthropic-key",
-        vertexai_project="test-project",
+        openai_api_key_free_1="gemini-key",
         litellm_master_key="master-key",
     )
 
