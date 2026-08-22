@@ -35,10 +35,14 @@ async def test_real_gemini_chat_completion() -> None:
         api_key=api_key,
         messages=[{"role": "user", "content": "Reply with exactly: OK"}],
         #max_tokens=64, # output token limit, the max of gemini is 64k
-        timeout=30,
+        #timeout=30,
     )
 
     assert response.choices
+    print(f"LLM response: {response.choices[0].message.content!r}")
+    print(f"LLM model: {response.model}")
+    print(f"LLM usage: {response.usage}")
+
     assert response.choices[0].message.role == "assistant"
     assert response.model
     assert response.usage is not None
