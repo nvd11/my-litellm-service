@@ -35,6 +35,24 @@
 
 这样可以先验证最小生产链路：模型调用、OpenAI 格式 API、Redis 精确缓存、Kong 路由和 API Key 鉴权。
 
+### Phase 1 数据库边界
+
+Phase 1 明确不接入 OCI MySQL，也不实现 LiteLLM Virtual Key 管理。Phase 1 只使用部署时注入的：
+
+```text
+LITELLM_MASTER_KEY
+```
+
+该密钥仅用于内部部署、联调和受控测试，不作为正式的多人共享凭证。Phase 1 不提供以下能力：
+
+- 为每位同事创建独立 Virtual Key。
+- 持久化保存用户 Key。
+- 按用户设置预算、过期时间和速率限制。
+- 按用户统计调用量和费用。
+- LiteLLM 请求审计日志写入 MySQL。
+
+OCI MySQL、Prisma 数据库初始化、Virtual Key 管理和用户级费用审计属于后续 Phase 2，不得为了完成 Phase 1 提前引入 `MYSQL_*` 配置或数据库依赖。
+
 ## 实施步骤与交付物总览
 
 每个阶段都必须有明确的交付物。交付物可以是代码文件、镜像、Kubernetes 资源、测试记录或验收结果；只有交付物完成并通过对应检查，才能进入下一阶段。
@@ -49,6 +67,8 @@
 | 5. ArgoCD 自动发布与回滚 | 验证后续 Git commit 自动发布、自愈和回滚 | 自动同步记录、自愈记录、回滚记录 | Application 持续显示 `Synced` 和 `Healthy` |
 
 后续章节分别说明每个阶段需要编写的文件、执行的动作和验收证据。
+
+本文档前面的章节用于说明架构、职责和配置；真正执行时以第 11 节“ArgoCD 发布顺序”为准。第 15 节的前置确认必须在阶段 A 开始前完成。
 
 ### 交付物命名和保存原则
 
@@ -86,13 +106,16 @@ Repo: my-argocd-manifests
 | Python 依赖和版本约束 | `nvd11/my-litellm-service` | `/pyproject.toml`、`/uv.lock` | 否；锁文件只记录依赖版本 |
 | LiteLLM 模型配置 | `nvd11/my-litellm-service` | `/config.yaml` | 否；只使用 `os.environ/...` 引用 |
 | 环境变量模板 | `nvd11/my-litellm-service` | `/.env.example` | 否；只使用占位值 |
-| Kubernetes Namespace | `nvd11/my-litellm-service` | `/deploy/k8s/namespace.yaml` | 否 |
-| LiteLLM ConfigMap | `nvd11/my-litellm-service` | `/deploy/k8s/configmap.yaml` | 否 |
-| Secret 字段模板 | `nvd11/my-litellm-service` | `/deploy/k8s/secret.example.yaml` | 否；不能放真实值 |
-| LiteLLM Deployment | `nvd11/my-litellm-service` | `/deploy/k8s/litellm-deployment.yaml` | 否；只引用 Secret |
-| LiteLLM ClusterIP Service | `nvd11/my-litellm-service` | `/deploy/k8s/litellm-service.yaml` | 否 |
-| Kong HTTPRoute/Ingress | `nvd11/my-litellm-service` | `/deploy/k8s/kong-route.yaml` | 否；TLS 私钥不提交 |
-| Secret 实例 | 集群 Secret 管理系统 | Namespace `llm-system` 中的 Secret，例如 `litellm-secrets` | 不进入 Git；由安全流程创建 |
+| Kubernetes Namespace | `my-argocd-manifests` / Helm Chart v2 | 由 ArgoCD Application 的目标 Namespace 创建 | 否 |
+| LiteLLM ConfigMap | `nvd11/my-shared-helm-charts` + `my-argocd-manifests` | Chart v2 模板和 Application values | 否 |
+| Secret 字段映射 | `nvd11/my-shared-helm-charts` + `my-argocd-manifests` | ExternalSecret 模板和 Application values | 否；不能放真实值 |
+| LiteLLM Deployment | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/deployment.yaml` | 否；只引用 Secret |
+| LiteLLM ClusterIP Service | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/service.yaml` | 否 |
+| Kong HTTPRoute | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/httproute.yaml` | 否；TLS 私钥不提交 |
+| OCI Vault Secret | OCI Secret Management Service | OCI Vault 中的 `litellm/openai-api-key-free-1`、`litellm/master-key`、`litellm/redis-password` | 真实值不进入 Git |
+| OCI Vault 读取身份 | OCI IAM | `litellm-vault-reader` User、`litellm-vault-readers` Group 及最小权限 Policy | 私钥不进入 Git |
+| ExternalSecret 模板 | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/externalsecret.yaml` | 不包含真实值 |
+| Kubernetes Secret 实例 | K3s API / External Secrets Operator | Namespace `llm-system` 中的 `litellm-secrets` | 由 Operator 从 OCI Vault 同步 |
 | ARM64/多架构容器镜像 | GHCR public package | `ghcr.io/nvd11/my-litellm-svc:<git-sha>` | 不包含 API Key |
 | 镜像构建记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/01-image-build.md` | 否 |
 | 环境确认记录 | `nvd11/my-litellm-service` | `docs/plans/evidence/05_litellm_oci_free_vm/00-environment.md` | 不记录密码和完整密钥 |
@@ -112,7 +135,7 @@ nvd11/my-litellm-service
 ├── 应用源码和测试
 ├── Dockerfile 和依赖
 ├── config.yaml
-├── deploy/k8s/ workload manifests
+├── deploy/k8s/ optional local/legacy references only
 └── docs/plans/evidence/ 部署证据
 
 my-argocd-manifests
@@ -124,7 +147,9 @@ my-shared-helm-charts
 
 应用 Repo 的 Kubernetes 清单负责描述 LiteLLM 如何运行；GitOps Repo 的 ArgoCD Application 负责描述 ArgoCD 从哪个 Repo、哪个 revision、哪个路径同步这些清单。两者不能混成一个文件，也不能把生产 Secret 复制到任一普通 Git Repo。
 
-## 3.1 创建 `generic-web-service-v2` Helm Chart
+## 3. Repo 交付物与 Helm Chart
+
+### 3.1 创建 `generic-web-service-v2` Helm Chart
 
 现有 `generic-web-service` Chart 已经被其他服务使用，不能为了 LiteLLM 直接修改其行为。本项目新增独立的 v2 Chart，保持 v1 兼容不变。
 
@@ -159,10 +184,11 @@ v2 至少需要支持：
 - `nodeSelector`。
 - HTTP 探针和 TCP 探针二选一配置。
 - 可选的 `imagePullSecrets`；LiteLLM 第一阶段使用 public GHCR 镜像，不需要配置拉取 Secret。
+- 可选的 `ExternalSecret` 模板，用于从 OCI Secret Management Service 同步运行时 Secret。
 - ClusterIP Service。
 - Kong HTTPRoute 和可配置的 `stripPath`。
 
-v2 不应写入 LiteLLM 专用逻辑，仍然保持通用服务 Chart 的定位。LiteLLM 的模型、Redis 和 API Key 配置由 `litellm-svc-app.yaml` 通过 values、ConfigMap 和 Secret 引用提供。
+v2 不应写入 LiteLLM 专用逻辑，仍然保持通用服务 Chart 的定位。LiteLLM 的模型、Redis 和 API Key 配置由 `litellm-svc-app.yaml` 通过 values、ConfigMap 和 Secret 引用提供。`ExternalSecret` 模板也必须是可选的通用能力，不能把 OCI Vault 的具体 Secret 名称硬编码到 Chart 中。
 
 LiteLLM 的 ArgoCD Application 使用 v2 Chart：
 
@@ -175,20 +201,13 @@ source:
 
 v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 文件验证渲染结果。未发布并验证 v2 之前，不进入 LiteLLM 的首次 ArgoCD Bootstrap。
 
-## 3. 需要新增或整理的仓库内容
+### 3.2 需要新增或整理的应用仓库内容
 
-建议新增以下目录和文件。它们是容器化和 Kubernetes 部署阶段的主要代码交付物：
+应用仓库需要新增容器构建和部署相关文件。主部署路径使用 `my-shared-helm-charts` 的 `generic-web-service-v2` 和 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`；本项目不再把 `deploy/k8s/` 原生 workload manifest 作为主部署来源。
+
+如果保留 `deploy/k8s/`，只能作为本地调试或备用部署参考，不能与 Helm Chart 同时被 ArgoCD 管理。
 
 ```text
-deploy/
-└── k8s/
-    ├── namespace.yaml
-    ├── configmap.yaml
-    ├── secret.example.yaml
-    ├── litellm-deployment.yaml
-    ├── litellm-service.yaml
-    └── kong-route.yaml
-
 .github/
 └── workflows/
     └── build-and-push-image.yaml
@@ -201,12 +220,8 @@ deploy/
 - [ ] `Dockerfile`。
 - [ ] `.dockerignore`。
 - [ ] `.github/workflows/build-and-push-image.yaml`。
-- [ ] `deploy/k8s/namespace.yaml`。
-- [ ] `deploy/k8s/configmap.yaml`。
-- [ ] `deploy/k8s/secret.example.yaml`。
-- [ ] `deploy/k8s/litellm-deployment.yaml`。
-- [ ] `deploy/k8s/litellm-service.yaml`。
-- [ ] `deploy/k8s/kong-route.yaml`。
+- [ ] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
+- [ ] `nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [ ] 一份不包含真实凭证的部署说明。
 
 ## 4. 容器镜像方案
@@ -505,14 +520,14 @@ HTTPS_PROXY
 ALL_PROXY
 ```
 
-### 5.2 Secret Manager 中保存敏感配置
+### 5.2 OCI Secret Management Service 中保存敏感配置
 
-以下变量必须通过 Kubernetes Secret、SealedSecret 或 External Secret Manager 注入：
+Phase 1 的真实运行时密钥统一保存在 OCI Secret Management Service（OCI Vault）中：
 
 ```text
-OPENAI_API_KEY_FREE_1
-LITELLM_MASTER_KEY
-REDIS_PASSWORD
+OCI Secret: litellm/openai-api-key-free-1 -> OPENAI_API_KEY_FREE_1
+OCI Secret: litellm/master-key            -> LITELLM_MASTER_KEY
+OCI Secret: litellm/redis-password         -> REDIS_PASSWORD
 ```
 
 职责分别是：
@@ -525,7 +540,74 @@ REDIS_PASSWORD         LiteLLM -> Redis
 
 这些值不能进入 ConfigMap、Dockerfile、镜像、Git Repo 或 GitHub Actions 日志。
 
-### 5.3 GitHub Actions Secrets
+### 5.3 External Secrets 同步链路
+
+K3s 中使用 External Secrets Operator 将 OCI Vault Secret 同步为 LiteLLM 使用的 Kubernetes Secret：
+
+```text
+OCI Secret Management Service
+    ↓ OCI IAM 授权
+External Secrets Operator
+    ↓
+ExternalSecret: litellm-secrets
+    ↓
+Kubernetes Secret: llm-system/litellm-secrets
+    ↓
+LiteLLM Pod 环境变量
+```
+
+`ExternalSecret` 只保存 OCI Secret 的引用和目标 Kubernetes Secret 的字段映射，不保存真实值。Operator、OCI provider 和认证方式必须在部署前验证；由于 K3s 不运行在 GKE 上，不能直接假设 GCP Workload Identity 方案可用。
+
+### 5.4 OCI Vault 最小权限读取身份
+
+External Secrets Operator 不使用个人 OCI 管理员身份，而使用专门的最小权限 OCI 身份：
+
+```text
+User:  litellm-vault-reader
+Group: litellm-vault-readers
+Policy: 只允许读取 LiteLLM 所在 compartment 中的 Secret
+```
+
+权限目标：
+
+```text
+Allow group litellm-vault-readers to read secret-bundles in compartment <target-compartment>
+```
+
+该身份只允许读取已有 Secret，不允许创建、删除或修改 Vault、Secret、加密密钥或其他 OCI 资源。
+
+如果当前 OCI provider 使用 API Signing Key 认证，则为该专用 User 创建 API Signing Key。私钥只进入安全的认证交付流程或 Kubernetes Secret，不得进入 Git、Docker 镜像、ConfigMap 或 GitHub Actions 日志。
+
+创建顺序：
+
+```text
+创建 OCI User
+    ↓
+加入 litellm-vault-readers Group
+    ↓
+创建最小权限 Policy
+    ↓
+创建 API Signing Key 或配置等效的 OCI workload identity
+    ↓
+验证只能读取 3 个 LiteLLM Secret
+    ↓
+配置 External Secrets Operator
+```
+
+该身份是读取身份，不是 Vault 管理员。Vault 和 Secret 的创建、轮换、删除由受控的 OCI 管理流程完成。
+
+需要确认并交付：
+
+- [ ] External Secrets Operator 已安装并运行。
+- [ ] OCI provider 支持当前 Operator 版本和 Secret Management API。
+- [ ] `litellm-vault-reader` User/Group/Policy 或等效 workload identity 已配置。
+- [ ] 读取身份只能访问 LiteLLM 所需 Secret。
+- [ ] `ExternalSecret` 能成功生成 `llm-system/litellm-secrets`。
+- [ ] Secret 刷新和轮换行为已测试。
+
+OCI Vault Secret 的真实值由 OCI IAM 权限保护；Kubernetes Secret 只作为 Operator 同步后的运行时对象存在。
+
+### 5.5 GitHub Actions Secrets
 
 GitHub Actions 使用的 Secret 与 Kubernetes 运行时 Secret 分开管理：
 
@@ -538,7 +620,7 @@ GITHUB_TOKEN
 
 由于 GHCR 镜像是 public，第一阶段不创建 Kubernetes `imagePullSecret`。
 
-### 5.4 Phase 1 暂不注入的变量
+### 5.6 Phase 1 暂不注入的变量
 
 以下变量属于后续 MySQL 审计、FastAPI Service B 或 Vertex AI 方案，第一阶段不注入 LiteLLM Pod：
 
@@ -708,6 +790,7 @@ litellm.llm-system.svc.cluster.local:4000
 
 ### 阶段 A：镜像和清单准备
 
+0. 完成第 15 节的环境、Redis、Kong、OCI Vault、ESO 和镜像仓库前置确认。
 1. 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
 2. 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
 3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
@@ -716,7 +799,7 @@ litellm.llm-system.svc.cluster.local:4000
 6. 本地构建镜像并启动容器验证 LiteLLM。
 7. 通过 GitHub Actions 构建并推送第一版镜像；首次 Bootstrap 不调用 `repository_dispatch`。
 8. 将第一版镜像推送到可被 K3s 节点访问的 GHCR 仓库。
-9. 完成 Namespace、ConfigMap、Secret 引用、Deployment 和 Service values 清单。
+9. 完成 LiteLLM Application 的 ConfigMap、ExternalSecret 引用、Deployment 和 Service values。
 10. 在 `my-argocd-manifests` Repo 中创建 LiteLLM 的 ArgoCD Application：
 
    ```text
@@ -735,27 +818,31 @@ litellm.llm-system.svc.cluster.local:4000
 - [ ] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
 - [ ] 已构建并推送的 ARM64 或多架构镜像。
 - [ ] 镜像完整地址、版本标签和构建记录。
-- [ ] `deploy/k8s/` 下的 Namespace、ConfigMap、Deployment、Service 和 Kong 路由清单。
 - [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [ ] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
-- [ ] Secret 字段清单和安全创建说明。
+- [ ] OCI Vault Secret 名称清单和创建记录；不保存真实值。
+- [ ] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
+- [ ] External Secrets Operator、OCI provider 和认证方案验证记录。
+- [ ] `ExternalSecret` 到 `llm-system/litellm-secrets` 的字段映射验证。
 - [ ] Kubernetes YAML 静态校验结果。
 
 ### 阶段 B：ArgoCD 首次同步与集群内最小闭环
 
-1. 通过安全流程创建 `llm-system` Namespace 和 Secret。
-2. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
-3. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
-4. 首次以人工确认方式同步 ArgoCD Application。
-5. 确认 Pod 调度到 `free-arm-vm`。
-6. 确认容器启动日志没有依赖缺失或配置解析错误。
-7. 从集群内临时测试 Pod 调用 LiteLLM。
-8. 验证 Redis `AUTH`、`PING` 和缓存读写。
+1. 通过安全流程在 OCI Secret Management Service 创建 3 个 Secret。
+2. 确认 External Secrets Operator 能读取 OCI Vault，并生成 `llm-system/litellm-secrets`。
+3. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
+4. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
+5. 首次以人工确认方式同步 ArgoCD Application。
+6. 确认 Pod 调度到 `free-arm-vm`。
+7. 确认容器启动日志没有依赖缺失或配置解析错误。
+8. 从集群内临时测试 Pod 调用 LiteLLM。
+9. 验证 Redis `AUTH`、`PING` 和缓存读写。
 
 阶段 B 交付物：
 
 - [ ] 已创建的 `llm-system` Namespace。
-- [ ] Secret 创建结果；输出中不得包含 Secret 明文。
+- [ ] OCI Vault Secret 和 ExternalSecret 同步结果；输出中不得包含 Secret 明文。
+- [ ] Kubernetes Secret `llm-system/litellm-secrets` 已由 Operator 生成。
 - [ ] ArgoCD Application 首次发现和同步记录。
 - [ ] LiteLLM Deployment 和 ClusterIP Service 的运行状态记录。
 - [ ] Pod 调度节点、镜像版本和启动日志记录。
@@ -858,11 +945,12 @@ litellm.llm-system.svc.cluster.local:4000
 第一阶段闭环稳定后，再分别规划：
 
 1. LiteLLM 请求日志和费用数据写入 OCI MySQL。
-2. FastAPI Service B 的评测接口。
-3. 多模型路由、重试和 fallback。
-4. API Key 分级、预算和速率限制。
-5. Prometheus 指标、集中式日志和告警。
-6. 多副本部署与滚动升级。
+2. Prisma 数据库初始化和 LiteLLM Virtual Key 管理。
+3. FastAPI Service B 的评测接口。
+4. 多模型路由、重试和 fallback。
+5. API Key 分级、预算和速率限制。
+6. Prometheus 指标、集中式日志和告警。
+7. 多副本部署与滚动升级。
 
 这些功能会增加 Secret、数据库、权限和运维复杂度，不应与第一次 LiteLLM 上线绑定实施。
 
@@ -874,9 +962,13 @@ litellm.llm-system.svc.cluster.local:4000
 - `free-arm-vm` 的实际节点标签。
 - Redis Service 的准确名称、Namespace、端口和认证方式。
 - K3s 节点能否直接访问 Gemini API。
-- 镜像仓库地址以及 ARM64 拉取权限。
+- 最终 Gemini 模型名称，目前计划为 `gemini-3.6-flash`。
+- 镜像仓库地址 `ghcr.io/nvd11/my-litellm-svc` 以及 ARM64 构建结果。
+- `generic-web-service-v2` Chart 的发布版本和 values 接口。
 - 现有 Kong/KIC 使用 Ingress 还是 Gateway API HTTPRoute。
 - 外部访问使用的域名、TLS 证书和访问范围。
-- Secret 的正式交付方式。
+- OCI Vault compartment、3 个 Secret 名称和 `litellm-vault-reader` 最小权限身份。
+- External Secrets Operator 的 OCI provider、认证方式和安装位置。
+- `ARGOCD_MANIFESTS_DISPATCH_TOKEN` 的 GitHub Actions Secret 配置。
 
 以上确认完成后，才进入 generic-web-service-v2、Dockerfile、GitHub Actions 和 ArgoCD Application 的实际编写与部署阶段。
