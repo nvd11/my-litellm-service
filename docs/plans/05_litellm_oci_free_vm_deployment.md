@@ -308,6 +308,17 @@ Digest: sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420
 Result: linux/amd64 and linux/arm64 pushed successfully
 ```
 
+CI 增加 digest 输出后再次验证成功：
+
+```text
+Run:    32647883414
+Commit: 83f9320cae408be95d25512d01bd2f0a0ee12dba
+Digest: sha256:60ca0cee8fb09c53d836359fba77c6411249d767c89f9fc3251e068be8247d7b
+Result: Build/push and Record manifest digest succeeded
+```
+
+当前 CI 已能可靠记录 Manifest Index digest，但尚未调用新的 `update-app-image-digest.yml`；该 dispatch 必须等 GitOps 仓库中的 digest workflow 和 LiteLLM Application 创建后再启用。
+
 随后通过 `workflow_dispatch` 对同一个 commit 再次构建，CI 仍然成功，但同一个 `sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1` tag 的 digest 从首轮的 `sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420` 变为第二轮的 `sha256:f3e227d791124398e055678603b82c89e566cc2b2532d70d2af25d227c8e6704`。因此当前 commit tag 可以被重复构建覆盖，不能作为严格不可变的部署引用；正式 ArgoCD 部署前需要改用 digest pinning，或确保每次构建使用唯一 tag。
 
 当前环境未连接 Docker daemon，尚未完成真实 ARM64 镜像构建；镜像构建和启动验证保留给 GitHub Actions 或可用 Docker 主机执行。
