@@ -223,7 +223,7 @@ charts/generic-web-service-v2/
 
 v2 至少需要支持：
 
-- `image.repository`、`image.tag`、`image.pullPolicy`。
+- `image.repository`、可选的 `image.tag`、可选的 `image.digest` 和 `image.pullPolicy`。当 `image.digest` 存在时，Deployment 使用 digest pinning；否则使用 tag。
 - `command` 和 `args`。
 - `env` 和 `envFrom`，用于注入 Kubernetes Secret。
 - `volumes` 和 `volumeMounts`，用于挂载 LiteLLM `config.yaml`。
@@ -298,6 +298,18 @@ Tags:      immutable commit SHA, release tag, main -> latest
 Registry:  GHCR
 ```
 
+首轮 CI 构建已成功完成：
+
+```text
+Run:    32640896475
+Commit: 00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1
+Tag:    ghcr.io/nvd11/my-litellm-svc:sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1
+Digest: sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420
+Result: linux/amd64 and linux/arm64 pushed successfully
+```
+
+随后通过 `workflow_dispatch` 对同一个 commit 再次构建，CI 仍然成功，但同一个 `sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1` tag 的 digest 从首轮的 `sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420` 变为第二轮的 `sha256:f3e227d791124398e055678603b82c89e566cc2b2532d70d2af25d227c8e6704`。因此当前 commit tag 可以被重复构建覆盖，不能作为严格不可变的部署引用；正式 ArgoCD 部署前需要改用 digest pinning，或确保每次构建使用唯一 tag。
+
 当前环境未连接 Docker daemon，尚未完成真实 ARM64 镜像构建；镜像构建和启动验证保留给 GitHub Actions 或可用 Docker 主机执行。
 
 ## 4. 容器镜像方案
@@ -332,7 +344,7 @@ ghcr.io/nvd11/my-litellm-svc:<git-commit-sha>
 
 - Docker build 和 push workflow。
 - `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 的 `image.repository`。
-- GitHub Actions 触发 `update-image-tag.yml` 时的镜像发布记录。
+- GitHub Actions 触发 `update-app-image-digest.yml` 时的镜像发布记录。
 - 集群内和 Kong 外部访问验收记录。
 
 ### 4.1 运行环境
@@ -356,7 +368,7 @@ LiteLLM 需要 proxy extra 中的依赖。之前本地启动时缺少 `backoff`�
 1. 构建并推送 ARM64 镜像；或
 2. 构建包含 `linux/arm64` 的多架构镜像。
 
-部署清单中的镜像标签必须是不可变版本标签，例如 Git commit SHA，不使用长期漂移的 `latest`。
+LiteLLM 的部署清单使用 manifest digest pinning，不依赖长期漂移的 `latest` 或可被重复构建覆盖的 commit tag。现有 v1 服务继续使用它们当前的 tag 流程，不在本次改造范围内。
 
 ### 4.3 GitHub Actions 镜像构建与推送
 
@@ -374,19 +386,25 @@ Workflow 至少应包含以下步骤：
 3. 设置 Docker Buildx。
 4. 登录镜像仓库。
 5. 构建 `linux/arm64` 镜像；如果镜像仓库和发布策略允许，也可以同时构建 `linux/amd64`。
-6. 使用 Git commit SHA 生成不可变镜像标签，例如：
+6. 生成镜像 tag 并记录最终 Manifest Index digest。tag 用于构建追踪，digest 用于 ArgoCD 部署，例如：
 
 ```text
 ghcr.io/nvd11/my-litellm-svc:<git-sha>
 ```
 
+ArgoCD 使用：
+
+```text
+ghcr.io/nvd11/my-litellm-svc@sha256:<64位十六进制 digest>
+```
+
 7. 推送镜像并生成构建摘要。
-8. 首次 Bootstrap 完成后，后续版本在镜像推送成功时，通过 GitHub API 向 `nvd11/my-argocd-manifests` 发送 `repository_dispatch` 事件。
+8. 首次 Bootstrap 完成后，后续版本在镜像推送成功时，通过 GitHub API 向 `nvd11/my-argocd-manifests` 发送 digest 更新用的 `repository_dispatch` 事件。
 9. 将镜像地址和 commit SHA 写入构建记录，供 Kubernetes Deployment 或后续 ArgoCD 更新使用。
 
 #### 4.3.1 首次部署 Bootstrap
 
-首次部署不能直接调用 `update-image-tag.yml`，因为该 workflow 只会修改已经存在的：
+首次部署不能直接调用 `update-app-image-digest.yml`，因为该 workflow 只会修改已经存在的：
 
 ```text
 my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
@@ -405,7 +423,7 @@ my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
     ↓
 在 my-argocd-manifests 创建 litellm-svc-app.yaml
     ↓
-填入第一版镜像的 repository 和 tag
+填入第一版镜像的 repository 和 digest
     ↓
 提交 Git commit
     ↓
@@ -419,7 +437,7 @@ ArgoCD 首次发现并同步 Application
 - [ ] 第一版已推送到 GHCR 的 LiteLLM ARM64 或多架构镜像。
 - [ ] GHCR Package visibility 已确认是 `public`。
 - [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
-- [ ] Application 中的 `image.repository` 和 `image.tag` 指向真实存在的镜像。
+- [ ] Application 中的 `image.repository` 和 `image.digest` 指向真实存在的 Manifest Index。
 - [ ] ArgoCD 首次同步记录。
 - [ ] 集群内 LiteLLM API 验证记录。
 
@@ -430,25 +448,33 @@ ArgoCD 首次发现并同步 Application
 
 推荐使用第一种方式，并在 CI 中增加 Bootstrap 标志或人工审批，避免在 Application 尚不存在时调用 Tag 更新 workflow。
 
-#### 4.3.2 后续版本触发 ArgoCD 镜像 Tag 更新 workflow
+#### 4.3.2 后续版本触发 ArgoCD 镜像 Digest 更新 workflow
+
+本项目不修改现有的 `.github/workflows/update-image-tag.yml`。该 workflow 继续服务 Quarkus、FastAPI 等使用 `image.tag` 的旧应用。本项目新增独立的：
+
+```text
+.github/workflows/update-app-image-digest.yml
+```
+
+该 workflow 只处理支持 `image.digest` 的新 Application，例如 LiteLLM；它必须校验 digest 格式后再更新目标清单。
 
 镜像推送成功后，当前应用 Repo 的 CI 必须调用：
 
 ```text
 Repo: nvd11/my-argocd-manifests
-Workflow: .github/workflows/update-image-tag.yml
+Workflow: .github/workflows/update-app-image-digest.yml
 Event: repository_dispatch
-Event type: update-image-tag
+Event type: update-app-image-digest
 ```
 
 调用时发送以下 payload：
 
 ```json
 {
-  "event_type": "update-image-tag",
-  "client_payload": {
-    "svc_name": "litellm-svc",
-    "image_tag": "<git-commit-sha>"
+    "event_type": "update-app-image-digest",
+    "client_payload": {
+      "svc_name": "litellm-svc",
+      "image_digest": "sha256:<64位十六进制 digest>"
   }
 }
 ```
@@ -461,7 +487,7 @@ Event type: update-image-tag
   nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
   ```
 
-- `image_tag` 必须是已经成功推送到 GHCR 的镜像 tag，推荐使用当前 Git commit SHA。
+- `image_digest` 必须是已经成功推送到 GHCR 的 Manifest Index digest，格式必须为 `sha256:<64位十六进制 digest>`。
 
 调用 API 的目标地址为：
 
@@ -486,21 +512,21 @@ Token 不得写入 workflow 文件、Dockerfile、项目 `.env` 或镜像。Toke
     ↓ 只有 push 成功才继续
 调用 repository_dispatch
     ↓
-update-image-tag.yml 修改 GitOps Repo 中的 image.tag
+update-app-image-digest.yml 修改 GitOps Repo 中的 image.digest
     ↓
 commit + push
     ↓
 ArgoCD 同步部署
 ```
 
-如果镜像 push 失败，不能触发 Tag 更新；如果 `repository_dispatch` 调用失败，当前 CI 必须失败并保留 API 响应，不能报告为成功。这样可以避免 GitOps 清单指向一个实际不存在的镜像。
+如果镜像 push 失败，不能触发 digest 更新；如果 `repository_dispatch` 调用失败，当前 CI 必须失败并保留 API 响应，不能报告为成功。这样可以避免 GitOps 清单指向一个实际不存在的镜像。
 
 GitHub Actions 中可以使用官方 API 或专门的 `repository_dispatch` Action 实现调用。无论采用哪种实现，都必须在构建日志中记录以下非敏感信息：
 
 - 目标 Repo。
 - event type。
 - `svc_name`。
-- `image_tag`。
+- `image_digest`。
 - API 调用 HTTP 状态。
 
 不得记录 dispatch token、完整 Authorization Header 或其他运行时密钥。
@@ -528,9 +554,9 @@ GitHub Actions 阶段的交付物为：
 - [ ] 镜像仓库地址和仓库权限配置记录。
 - [ ] GitHub Actions Secrets 名称清单，不包含 Secret 值。
 - [ ] 一次成功的 ARM64 或多架构构建记录。
-- [ ] 推送后的不可变镜像地址和 commit SHA。
+- [ ] 推送后的 Manifest Index digest、镜像地址和 commit SHA。
 - [ ] 成功调用 `repository_dispatch` 的记录。
-- [ ] `svc_name`、`image_tag` 和目标 manifest 文件对应关系的验证记录。
+- [ ] `svc_name`、`image_digest` 和目标 manifest 文件对应关系的验证记录。
 - [ ] 镜像可以被 `free-arm-vm` 节点拉取的验证记录。
 
 ### 4.4 日志策略
@@ -1071,9 +1097,9 @@ Phase 1 路由设计需要明确：
    my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
    ```
 
-   该文件至少需要定义镜像 Repository、初始 image tag、Helm Chart 来源、目标集群、Namespace、Service 参数和 Kong 路由参数。初始 `image.tag` 必须使用一个已经存在于 GHCR 的镜像 tag，不能使用尚未推送的值。
+   该文件至少需要定义镜像 Repository、初始 image digest、Helm Chart 来源、目标集群、Namespace、Service 参数和 Kong 路由参数。初始 `image.digest` 必须使用一个已经存在于 GHCR 的 Manifest Index digest，不能使用尚未推送的值。
 
-11. 确认 `svc_name=litellm-svc` 会映射到该文件，使 `update-image-tag.yml` 能够正确更新它。
+11. 确认 `svc_name=litellm-svc` 会映射到该文件，使 `update-app-image-digest.yml` 能够正确更新它。
 12. 用 `helm template`、YAML 校验和 ArgoCD manifest 检查清单。
 
 阶段 A 交付物：
@@ -1081,8 +1107,8 @@ Phase 1 路由设计需要明确：
 - [ ] 可审查的 `Dockerfile` 和 `.dockerignore`。
 - [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
 - [x] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
-- [ ] 已构建并推送的 ARM64 或多架构镜像。
-- [ ] 镜像完整地址、版本标签和构建记录。
+- [x] 已构建并推送的 ARM64 或多架构镜像。
+- [x] 镜像完整地址、版本标签和构建记录。
 - [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [ ] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
 - [ ] OCI Vault Secret 名称清单和创建记录；不保存真实值。
@@ -1140,7 +1166,7 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 ### 阶段 D：ArgoCD 自动发布与回滚
 
 1. 确认阶段 B 的首次同步和集群内验证已经成功。
-2. 验证后续镜像构建能够调用 `repository_dispatch` 并更新 `image.tag`。
+2. 验证后续镜像构建能够调用 `repository_dispatch` 并更新 `image.digest`。
 3. 验证 ArgoCD 发现 Git commit 后自动同步新镜像。
 4. 验证 `automated sync` 和 `selfHeal`。
 5. 演练镜像回滚或 Git revision 回滚。
@@ -1150,7 +1176,7 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 
 - [ ] 后续 `repository_dispatch` 调用成功记录。
 - [ ] Application 对应的 Git 仓库、路径和 revision 记录。
-- [ ] 新 image tag 触发的自动同步结果。
+- [ ] 新 image digest 触发的自动同步结果。
 - [ ] `Synced`、`Healthy` 状态截图或命令输出。
 - [ ] Pod 删除后由 Deployment 恢复的记录。
 - [ ] 镜像回滚或 Git revision 回滚的演练记录。

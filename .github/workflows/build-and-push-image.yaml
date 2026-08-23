@@ -41,12 +41,17 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # type=sha,format=long -> sha-<40-character-full-commit-sha>
+          # type=ref,event=tag -> <Git-release-tag>, for example v2.0.0
+          # type=raw,value=latest -> latest, only when the ref is main
+          # These tags are for traceability; ArgoCD will later consume the manifest digest.
           tags: |
             type=sha,format=long
             type=ref,event=tag
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -59,3 +64,15 @@ jobs:
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Record manifest digest
+        run: |
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
+          {
+            echo "### Published Image"
+            echo
+            echo '- Repository: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`'
+            echo '- Manifest digest: `${{ steps.build.outputs.digest }}`'
+            echo '- Commit: `${{ github.sha }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
