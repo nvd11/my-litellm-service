@@ -1449,6 +1449,17 @@ OCI CLI 已成功读取 tenancy、实例、子网和 Security List 信息。Secu
 Phase 0：公网入口准备完成
 Phase 1：镜像、digest GitOps 流程、Chart 和 Application 已准备完成
 当前状态：OCI Vault 已配置，等待 ESO Bootstrap Secret、SecretStore/ExternalSecret 和 ArgoCD 首次同步
+
+下一步执行顺序：
+
+1. 检查 `external-secrets` Operator 是否已安装并处于 `Running`。
+2. 确认或创建 `llm-system` Namespace。
+3. 使用本机受限路径中的 OCI API Signing Key 和 fingerprint，集群外创建 `llm-system/oci-litellm-vault-reader` Bootstrap Secret。
+4. 创建并验证 `llm-system` 中的 `SecretStore`，指向 `litellm-vault`。
+5. 创建并验证 `ExternalSecret`，将三个 OCI Secret 同步为 `llm-system/litellm-secrets`。
+6. 确认运行时 Secret 同步成功后，再执行 `litellm-svc` ArgoCD 首次同步。
+
+当前不应启用 `ENABLE_GITOPS_DIGEST_DISPATCH`；该变量必须等 ArgoCD Application 首次同步并验证健康后再设置为 `true`。
 ```
 
 下一步按阶段 A 开始编写镜像和 Helm 部署材料；阶段 C 仍需在 LiteLLM 部署后创建 HTTPRoute 并完成 API 验收。
