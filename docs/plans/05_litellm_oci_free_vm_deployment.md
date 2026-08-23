@@ -680,6 +680,24 @@ OCI Secret: litellm/master-key            -> LITELLM_MASTER_KEY
 OCI Secret: litellm/redis-password         -> REDIS_PASSWORD
 ```
 
+OCI 资源已实际创建（2026-08-24）：
+
+```text
+Compartment: litellm-prod
+Vault:       litellm-vault
+Key:         litellm-secrets-key (AES-256, HSM, ENABLED)
+```
+
+OCI Secret 名称不允许使用 `/`，实际名称使用连字符，映射如下：
+
+```text
+litellm-openai-api-key-free-1 -> OPENAI_API_KEY_FREE_1
+litellm-master-key            -> LITELLM_MASTER_KEY
+litellm-redis-password        -> REDIS_PASSWORD
+```
+
+三个 Secret 均已创建并处于 `ACTIVE`。ESO 专用用户、用户组和最小读取 Policy 已创建；API Signing Key 私钥只保存在本机受限路径，不进入 Git。
+
 职责分别是：
 
 ```text
