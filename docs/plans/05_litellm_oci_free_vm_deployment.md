@@ -267,7 +267,7 @@ v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 
 
 - [x] `Dockerfile`。
 - [x] `.dockerignore`。
-- [ ] `.github/workflows/build-and-push-image.yaml`。
+- [x] `.github/workflows/build-and-push-image.yaml`。
 - [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
 - [ ] `nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [ ] 一份不包含真实凭证的部署说明。
@@ -286,6 +286,16 @@ Tag:    v2.0.0
 ```text
 Dockerfile:    python:3.12-slim + uv.lock --frozen + non-root runtime
 .dockerignore: 排除 .env、Git、虚拟环境、测试、文档和本地缓存
+```
+
+GitHub Actions 工作流已完成：
+
+```text
+Workflow: .github/workflows/build-and-push-image.yaml
+Platforms: linux/amd64, linux/arm64
+Image:     ghcr.io/nvd11/my-litellm-svc
+Tags:      immutable commit SHA, release tag, main -> latest
+Registry:  GHCR
 ```
 
 当前环境未连接 Docker daemon，尚未完成真实 ARM64 镜像构建；镜像构建和启动验证保留给 GitHub Actions 或可用 Docker 主机执行。
@@ -1050,7 +1060,7 @@ Phase 1 路由设计需要明确：
 2. [x] 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
 3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
 4. [x] 编写 ARM64 或多架构 Dockerfile。
-5. 编写 `.github/workflows/build-and-push-image.yaml`。
+5. [x] 编写 `.github/workflows/build-and-push-image.yaml`。
 6. 本地构建镜像并启动容器验证 LiteLLM。
 7. 通过 GitHub Actions 构建并推送第一版镜像；首次 Bootstrap 不调用 `repository_dispatch`。
 8. 将第一版镜像推送到可被 K3s 节点访问的 GHCR 仓库。
