@@ -17,7 +17,7 @@
 
 ## 2. 第一阶段的部署边界
 
-第一阶段只部署 LiteLLM Service A：
+第一阶段只部署 LiteLLM Service A，并且必须通过现有 Kong/KIC 的公网入口跑通 LiteLLM API。Phase 1 只要求公网 IP 访问，不以域名和 HTTPS 作为上线阻塞条件：
 
 ```text
 客户端 -> 现有 Kong/KIC -> LiteLLM Proxy -> Gemini API
@@ -31,9 +31,10 @@
 - OCI MySQL 审计日志和费用统计。
 - 新建 Redis、Kong、Ingress Controller 或数据库。
 - 将 Redis `6379` 暴露到公网。
+- 将 LiteLLM 的管理接口无保护地暴露到公网。
 - 将 LiteLLM 容器日志直接写入容器内的 `/var/log`。
 
-这样可以先验证最小生产链路：模型调用、OpenAI 格式 API、Redis 精确缓存、Kong 路由和 API Key 鉴权。
+公网入口只允许通过 Kong/KIC 暴露 LiteLLM 的受保护 API 路径；Redis、Kubernetes Service 和 LiteLLM 管理接口不直接暴露公网。Phase 1 必须验证模型调用、OpenAI 格式 API、Redis 精确缓存、Kong 公网 IP 路由和 API Key 鉴权。域名、正式 TLS 和公网安全加固属于后续阶段。
 
 ### Phase 1 数据库边界
 
@@ -63,7 +64,7 @@ OCI MySQL、Prisma 数据库初始化、Virtual Key 管理和用户级费用审�
 | 1. Helm Chart、容器化与 GitOps 清单准备 | 创建通用服务 Chart v2，构建镜像并准备 LiteLLM 的 ArgoCD Application | `generic-web-service-v2`、`Dockerfile`、`.dockerignore`、GitHub Actions workflow、镜像标签、`argocd-apps/litellm-svc-app.yaml`、构建记录 | Chart 能渲染 LiteLLM 所需资源，容器能够启动，GitOps 清单能指向有效镜像，CI 构建成功 |
 | 2. ArgoCD 首次同步与集群内闭环 | 通过 ArgoCD 首次部署 LiteLLM 并完成内部验证 | Namespace、ConfigMap、Secret 创建记录、Application 首次同步记录、集群内测试记录 | Pod 在 `free-arm-vm` Running，集群内 API 调用成功 |
 | 3. Redis 联调 | 验证缓存和 Redis 网络连接 | Redis 连接测试记录、重复请求缓存测试记录 | `AUTH`、`PING`、缓存命中均成功，Redis 未暴露公网 |
-| 4. Kong 接入 | 通过现有网关提供外部 HTTPS API | HTTPRoute/Ingress、TLS 配置、路由测试记录 | 外部请求经过 Kong 成功到达 LiteLLM |
+| 4. Kong 公网接入 | 通过现有网关提供受保护的公网 IP API | HTTPRoute/Ingress、公网入口和外部路由测试记录 | 公网 IP 请求经过 Kong 成功到达 LiteLLM，且管理接口和 Redis 未暴露 |
 | 5. ArgoCD 自动发布与回滚 | 验证后续 Git commit 自动发布、自愈和回滚 | 自动同步记录、自愈记录、回滚记录 | Application 持续显示 `Synced` 和 `Healthy` |
 
 后续章节分别说明每个阶段需要编写的文件、执行的动作和验收证据。
@@ -112,8 +113,10 @@ Repo: my-argocd-manifests
 | LiteLLM Deployment | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/deployment.yaml` | 否；只引用 Secret |
 | LiteLLM ClusterIP Service | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/service.yaml` | 否 |
 | Kong HTTPRoute | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/httproute.yaml` | 否；TLS 私钥不提交 |
-| OCI Vault Secret | OCI Secret Management Service | OCI Vault 中的 `litellm/openai-api-key-free-1`、`litellm/master-key`、`litellm/redis-password` | 真实值不进入 Git |
-| OCI Vault 读取身份 | OCI IAM | `litellm-vault-reader` User、`litellm-vault-readers` Group 及最小权限 Policy | 私钥不进入 Git |
+| OCI Compartment | OCI IAM | 专用 Compartment：`litellm-prod` | OCI 资源边界，不进入应用 Git |
+| OCI Vault Secret | OCI Secret Management Service | `litellm-prod` 中 Vault 的 `litellm/openai-api-key-free-1`、`litellm/master-key`、`litellm/redis-password` | 真实值不进入 Git |
+| OCI Vault 读取身份 | OCI IAM | `litellm-vault-reader` User、`litellm-vault-readers` Group 及最小权限 Policy，作用域为 `litellm-prod` | 私钥不进入 Git |
+| ESO OCI 认证 Bootstrap Secret | K3s Kubernetes Secret | `llm-system/oci-litellm-vault-reader`；与命名空间级 `SecretStore` 同 Namespace | 集群外创建，不进入 Git |
 | ExternalSecret 模板 | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/externalsecret.yaml` | 不包含真实值 |
 | Kubernetes Secret 实例 | K3s API / External Secrets Operator | Namespace `llm-system` 中的 `litellm-secrets` | 由 Operator 从 OCI Vault 同步 |
 | ARM64/多架构容器镜像 | GHCR public package | `ghcr.io/nvd11/my-litellm-svc:<git-sha>` | 不包含 API Key |
@@ -520,7 +523,36 @@ HTTPS_PROXY
 ALL_PROXY
 ```
 
-### 5.2 OCI Secret Management Service 中保存敏感配置
+### 5.2 OCI Compartment 边界
+
+LiteLLM 的 OCI 资源不直接放在 Tenancy 根 Compartment 中，而是使用专用 Compartment：
+
+```text
+Compartment: litellm-prod
+Region: ap-singapore-1
+```
+
+资源层级：
+
+```text
+Tenancy
+└── litellm-prod
+    └── LiteLLM Vault
+        ├── litellm/openai-api-key-free-1
+        ├── litellm/master-key
+        └── litellm/redis-password
+```
+
+创建顺序：
+
+1. 创建 `litellm-prod` Compartment。
+2. 在 `litellm-prod` 中创建 OCI Vault。
+3. 在该 Vault 中创建 LiteLLM 所需的 3 个 Secret。
+4. 将读取 Policy 限制在 `litellm-prod`。
+
+本 Compartment 只用于 LiteLLM 的 OCI Secret 资源，不能把读取权限扩大到 Tenancy 根或其他 Compartment。
+
+### 5.3 OCI Secret Management Service 中保存敏感配置
 
 Phase 1 的真实运行时密钥统一保存在 OCI Secret Management Service（OCI Vault）中：
 
@@ -540,9 +572,95 @@ REDIS_PASSWORD         LiteLLM -> Redis
 
 这些值不能进入 ConfigMap、Dockerfile、镜像、Git Repo 或 GitHub Actions 日志。
 
-### 5.3 External Secrets 同步链路
+### 5.4 External Secrets 同步链路
 
-K3s 中使用 External Secrets Operator 将 OCI Vault Secret 同步为 LiteLLM 使用的 Kubernetes Secret：
+K3s 中使用 External Secrets Operator（ESO）将 OCI Vault Secret 同步为 LiteLLM 使用的 Kubernetes Secret。ESO 是运行在 Kubernetes 中的控制器，不是 OCI Vault，也不是 LiteLLM 应用本身。
+
+本计划固定使用 External Secrets Operator Helm Chart `2.9.0`。官方 OCI provider 已确认可用，并支持 `UserPrincipal`、`InstancePrincipal` 和 `Workload` 三种 OCI 认证方式；Phase 1 使用 `UserPrincipal` 加 OCI API Signing Key。
+
+ESO Controller 与 LiteLLM 资源分开管理：
+
+```text
+external-secrets
+└── ESO Controller
+
+llm-system
+├── oci-litellm-vault-reader  # ESO 读取 OCI Vault 的 Bootstrap Secret
+├── oci-litellm-vault-store   # 命名空间级 SecretStore
+├── litellm-secrets           # ExternalSecret 生成的运行时 Secret
+└── LiteLLM Pod
+```
+
+本计划使用命名空间级 `SecretStore`，因此它引用的 API Signing Key Secret 必须与 `SecretStore` 位于同一个 Namespace，即 `llm-system`。不能把该 Secret 只放在 `external-secrets` Namespace 后，再让 `llm-system` 中的 `SecretStore` 直接引用。
+
+已确认的 ESO API 版本和资源格式为：
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: oci-litellm-vault-store
+  namespace: llm-system
+spec:
+  provider:
+    oracle:
+      vault: "<VAULT_OCID>"
+      region: "ap-singapore-1"
+      principalType: UserPrincipal
+      auth:
+        user: "<USER_OCID>"
+        tenancy: "<TENANCY_OCID>"
+        secretRef:
+          privatekey:
+            name: oci-litellm-vault-reader
+            key: privateKey
+          fingerprint:
+            name: oci-litellm-vault-reader
+            key: fingerprint
+```
+
+API Signing Key 的 Kubernetes Bootstrap Secret 格式为：
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oci-litellm-vault-reader
+  namespace: llm-system
+type: Opaque
+stringData:
+  privateKey: |
+    -----BEGIN PRIVATE KEY-----
+    <OCI_API_SIGNING_PRIVATE_KEY>
+    -----END PRIVATE KEY-----
+  fingerprint: "<OCI_API_KEY_FINGERPRINT>"
+```
+
+`privateKey` 和 `fingerprint` 放在 Kubernetes Secret 中；`user`、`tenancy`、`region` 和 `vault` 是 provider 配置字段。以上 YAML 只允许作为格式模板，不能填入真实凭证并提交到 Git。
+
+运行时 Secret 的同步格式为：
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: litellm-secrets
+  namespace: llm-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: oci-litellm-vault-store
+    kind: SecretStore
+  target:
+    name: litellm-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: LITELLM_MASTER_KEY
+      remoteRef:
+        key: litellm/master-key
+```
+
+`OPENAI_API_KEY_FREE_1` 和 `REDIS_PASSWORD` 使用相同的 `data` 映射继续加入。OCI Vault 中的 Secret 名称和 Kubernetes Secret 字段名称可以不同。
 
 ```text
 OCI Secret Management Service
@@ -556,9 +674,9 @@ Kubernetes Secret: llm-system/litellm-secrets
 LiteLLM Pod 环境变量
 ```
 
-`ExternalSecret` 只保存 OCI Secret 的引用和目标 Kubernetes Secret 的字段映射，不保存真实值。Operator、OCI provider 和认证方式必须在部署前验证；由于 K3s 不运行在 GKE 上，不能直接假设 GCP Workload Identity 方案可用。
+`ExternalSecret` 只保存 OCI Secret 的引用和目标 Kubernetes Secret 的字段映射，不保存真实值。由于当前集群是 Tencent K3s，不使用仅适用于 OKE 的 OCI Workload Identity，改用已确认可用的 User Principal API Signing Key。
 
-### 5.4 OCI Vault 最小权限读取身份
+### 5.5 OCI Vault 最小权限读取身份
 
 External Secrets Operator 不使用个人 OCI 管理员身份，而使用专门的最小权限 OCI 身份：
 
@@ -578,6 +696,31 @@ Allow group litellm-vault-readers to read secret-bundles in compartment <target-
 
 如果当前 OCI provider 使用 API Signing Key 认证，则为该专用 User 创建 API Signing Key。私钥只进入安全的认证交付流程或 Kubernetes Secret，不得进入 Git、Docker 镜像、ConfigMap 或 GitHub Actions 日志。
 
+Phase 1 固定使用：
+
+```text
+OCI User: litellm-vault-reader
+认证方式: OCI API Signing Key
+K3s 交付位置: `llm-system` Namespace 的 Kubernetes Secret
+Secret 名称: oci-litellm-vault-reader
+```
+
+这个 Kubernetes Secret 是 ESO 的 bootstrap 凭证，不是 LiteLLM 的运行时 Secret。它不能通过 ExternalSecret 从 OCI Vault 生成，因为 ESO 必须先拥有它才能访问 OCI Vault。
+
+Bootstrap 链路：
+
+```text
+OCI User API Signing Key
+    ↓ 集群外安全创建
+Kubernetes Secret: llm-system/oci-litellm-vault-reader
+    ↓
+External Secrets Operator
+    ↓ OCI IAM Policy
+OCI Vault: litellm-prod
+```
+
+该 Bootstrap Secret 应启用最小 RBAC 访问范围和 etcd 加密存储；它不放入 `ConfigMap`、Git、Docker 镜像或 ArgoCD 普通 values 文件。
+
 创建顺序：
 
 ```text
@@ -587,7 +730,7 @@ Allow group litellm-vault-readers to read secret-bundles in compartment <target-
     ↓
 创建最小权限 Policy
     ↓
-创建 API Signing Key 或配置等效的 OCI workload identity
+创建 API Signing Key
     ↓
 验证只能读取 3 个 LiteLLM Secret
     ↓
@@ -598,16 +741,18 @@ Allow group litellm-vault-readers to read secret-bundles in compartment <target-
 
 需要确认并交付：
 
-- [ ] External Secrets Operator 已安装并运行。
-- [ ] OCI provider 支持当前 Operator 版本和 Secret Management API。
-- [ ] `litellm-vault-reader` User/Group/Policy 或等效 workload identity 已配置。
+- [ ] External Secrets Operator Helm Chart `2.9.0` 已安装在 `external-secrets` Namespace 并运行。
+- [ ] 官方 OCI provider 支持已确认，资源使用 `external-secrets.io/v1`。
+- [ ] `SecretStore` 使用 `principalType: UserPrincipal`，并使用准确的 `privatekey` 字段引用。
+- [ ] `litellm-vault-reader` User、Group、Policy 和 API Signing Key 已配置。
 - [ ] 读取身份只能访问 LiteLLM 所需 Secret。
+- [ ] `llm-system/oci-litellm-vault-reader` Bootstrap Secret 已由集群外安全流程创建，且未提交到 Git。
 - [ ] `ExternalSecret` 能成功生成 `llm-system/litellm-secrets`。
 - [ ] Secret 刷新和轮换行为已测试。
 
 OCI Vault Secret 的真实值由 OCI IAM 权限保护；Kubernetes Secret 只作为 Operator 同步后的运行时对象存在。
 
-### 5.5 GitHub Actions Secrets
+### 5.6 GitHub Actions Secrets
 
 GitHub Actions 使用的 Secret 与 Kubernetes 运行时 Secret 分开管理：
 
@@ -620,7 +765,7 @@ GITHUB_TOKEN
 
 由于 GHCR 镜像是 public，第一阶段不创建 Kubernetes `imagePullSecret`。
 
-### 5.6 Phase 1 暂不注入的变量
+### 5.7 Phase 1 暂不注入的变量
 
 以下变量属于后续 MySQL 审计、FastAPI Service B 或 Vertex AI 方案，第一阶段不注入 LiteLLM Pod：
 
@@ -758,12 +903,12 @@ ModuleNotFoundError: No module named 'prisma'
 
 ## 10. Kong/KIC 接入方案
 
-LiteLLM 部署并在集群内验证成功后，再通过现有 Kong/KIC 增加 HTTPRoute 或 Ingress：
+LiteLLM 部署并在集群内验证成功后，通过现有 Kong/KIC 增加公网 IP 可访问的 HTTPRoute 或 Ingress：
 
 ```text
 外部客户端
     |
-    | HTTPS
+    | HTTP（Phase 1 临时验证）
     v
 现有 Kong Gateway
     |
@@ -774,13 +919,14 @@ HTTPRoute/Ingress
 litellm.llm-system.svc.cluster.local:4000
 ```
 
-路由设计需要明确：
+Phase 1 路由设计需要明确：
 
-- 使用独立域名或明确的路径前缀。
-- TLS 终止位置和证书来源。
+- 公网 IP 入口和明确的路径前缀。
 - 是否保留 `/v1` 路径。
 - Kong 的超时设置必须覆盖 Gemini 的正常响应时间。
 - 客户端仍然通过 `LITELLM_MASTER_KEY` 鉴权。
+
+域名、TLS 终止和证书来源不作为 Phase 1 前置条件，后续再补充正式 HTTPS 接入。
 
 不通过 Kong 暴露 Redis，不创建 Redis 公网入口，也不把 LiteLLM 的管理接口无保护地暴露给同事或公网。
 
@@ -790,7 +936,7 @@ litellm.llm-system.svc.cluster.local:4000
 
 ### 阶段 A：镜像和清单准备
 
-0. 完成第 15 节的环境、Redis、Kong、OCI Vault、ESO 和镜像仓库前置确认。
+0. 完成第 15 节的环境、Redis、Kong、`litellm-prod` Compartment、OCI Vault、ESO 和镜像仓库前置确认。
 1. 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
 2. 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
 3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
@@ -822,21 +968,23 @@ litellm.llm-system.svc.cluster.local:4000
 - [ ] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
 - [ ] OCI Vault Secret 名称清单和创建记录；不保存真实值。
 - [ ] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
+- [ ] ESO bootstrap Secret `oci-litellm-vault-reader` 的安全创建记录；不保存私钥明文。
 - [ ] External Secrets Operator、OCI provider 和认证方案验证记录。
 - [ ] `ExternalSecret` 到 `llm-system/litellm-secrets` 的字段映射验证。
 - [ ] Kubernetes YAML 静态校验结果。
 
 ### 阶段 B：ArgoCD 首次同步与集群内最小闭环
 
-1. 通过安全流程在 OCI Secret Management Service 创建 3 个 Secret。
-2. 确认 External Secrets Operator 能读取 OCI Vault，并生成 `llm-system/litellm-secrets`。
-3. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
-4. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
-5. 首次以人工确认方式同步 ArgoCD Application。
-6. 确认 Pod 调度到 `free-arm-vm`。
-7. 确认容器启动日志没有依赖缺失或配置解析错误。
-8. 从集群内临时测试 Pod 调用 LiteLLM。
-9. 验证 Redis `AUTH`、`PING` 和缓存读写。
+1. 通过安全流程创建 `litellm-prod` Compartment、Vault 和 3 个 OCI Secret。
+2. 通过集群外安全流程创建 ESO bootstrap Secret `oci-litellm-vault-reader`。
+3. 确认 External Secrets Operator 使用该 bootstrap Secret 读取 `litellm-prod` 中的 OCI Vault，并生成 `llm-system/litellm-secrets`。
+4. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
+5. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
+6. 首次以人工确认方式同步 ArgoCD Application。
+7. 确认 Pod 调度到 `free-arm-vm`。
+8. 确认容器启动日志没有依赖缺失或配置解析错误。
+9. 从集群内临时测试 Pod 调用 LiteLLM。
+10. 验证 Redis `AUTH`、`PING` 和缓存读写。
 
 阶段 B 交付物：
 
@@ -849,20 +997,24 @@ litellm.llm-system.svc.cluster.local:4000
 - [ ] 集群内 `/v1/models` 测试结果。
 - [ ] 集群内 `/v1/chat/completions` 测试结果。
 
-### 阶段 C：Kong 接入
+### 阶段 C：Kong 公网 IP 接入（Phase 1 必须完成）
 
-1. 先以内部或受限域名创建路由。
-2. 验证 HTTPS、鉴权、超时和错误码透传。
-3. 验证 `/v1/models`。
-4. 验证 `/v1/chat/completions`。
-5. 再决定是否开放给非 Tailscale 同事访问。
+1. 确认现有 Kong/KIC 的公网 IP 入口可达。
+2. 创建通过公网 IP 匹配的 HTTPRoute 或 Ingress。
+3. 只开放 LiteLLM 受保护的 OpenAI 兼容 API 路径。
+4. 验证公网 IP、鉴权、超时和错误码透传。
+5. 验证公网 `/v1/models`。
+6. 验证公网 `/v1/chat/completions`。
+7. 确认管理接口、Redis 和 Kubernetes API 没有公网暴露。
+
+Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Master Key，不应把长期生产凭证通过明文 HTTP 传输。域名、TLS 证书和 HTTPS 加固在后续阶段补齐。
 
 阶段 C 交付物：
 
 - [ ] HTTPRoute 或 Ingress 清单。
-- [ ] 域名、TLS 证书和 Kong upstream 配置记录。
-- [ ] 外部 `/v1/models` 测试结果。
-- [ ] 外部 `/v1/chat/completions` 测试结果。
+- [ ] 公网 IP、Kong upstream 和路由配置记录。
+- [ ] 公网 `/v1/models` 测试结果。
+- [ ] 公网 `/v1/chat/completions` 测试结果。
 - [ ] 401、429、5xx、超时等错误路径测试记录。
 - [ ] Redis 未被 Kong 暴露公网的检查结果。
 
@@ -966,8 +1118,9 @@ litellm.llm-system.svc.cluster.local:4000
 - 镜像仓库地址 `ghcr.io/nvd11/my-litellm-svc` 以及 ARM64 构建结果。
 - `generic-web-service-v2` Chart 的发布版本和 values 接口。
 - 现有 Kong/KIC 使用 Ingress 还是 Gateway API HTTPRoute。
-- 外部访问使用的域名、TLS 证书和访问范围。
-- OCI Vault compartment、3 个 Secret 名称和 `litellm-vault-reader` 最小权限身份。
+- 公网入口 IP、访问路径和访问范围；域名与 TLS 暂不作为 Phase 1 前置条件。
+- `litellm-prod` Compartment 是否已创建，以及 Vault 是否位于该 Compartment。
+- 3 个 OCI Secret 名称和 `litellm-vault-reader` 最小权限身份。
 - External Secrets Operator 的 OCI provider、认证方式和安装位置。
 - `ARGOCD_MANIFESTS_DISPATCH_TOKEN` 的 GitHub Actions Secret 配置。
 
