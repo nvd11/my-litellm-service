@@ -317,7 +317,15 @@ Digest: sha256:60ca0cee8fb09c53d836359fba77c6411249d767c89f9fc3251e068be8247d7b
 Result: Build/push and Record manifest digest succeeded
 ```
 
-当前 CI 已能可靠记录 Manifest Index digest，但尚未调用新的 `update-app-image-digest.yml`；该 dispatch 必须等 GitOps 仓库中的 digest workflow 和 LiteLLM Application 创建后再启用。
+当前 CI 已能可靠记录 Manifest Index digest，并已加入新的 `update-app-image-digest.yml` dispatch 步骤。该步骤由应用仓库变量 `ENABLE_GITOPS_DIGEST_DISPATCH=true` 控制，当前保持关闭，待 LiteLLM Application 首次 Bootstrap 并同步成功后再启用。
+
+本次 CI/GitOps 改造已发布：
+
+```text
+my-shared-helm-charts:  v2.1.0 (digest 优先渲染)
+my-argocd-manifests:   9425e10 (digest workflow + LiteLLM Application)
+my-litellm-service:    923a6fd (push 后 dispatch digest)
+```
 
 随后通过 `workflow_dispatch` 对同一个 commit 再次构建，CI 仍然成功，但同一个 `sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1` tag 的 digest 从首轮的 `sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420` 变为第二轮的 `sha256:f3e227d791124398e055678603b82c89e566cc2b2532d70d2af25d227c8e6704`。因此当前 commit tag 可以被重复构建覆盖，不能作为严格不可变的部署引用；正式 ArgoCD 部署前需要改用 digest pinning，或确保每次构建使用唯一 tag。
 
@@ -1095,14 +1103,14 @@ Phase 1 路由设计需要明确：
 0. 确认阶段 0 已完成，并完成第 15 节其余的环境、Redis、`litellm-prod` Compartment、OCI Vault、ESO 和镜像仓库前置确认。
 1. [x] 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
 2. [x] 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
-3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
+3. [x] 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.1.0`。
 4. [x] 编写 ARM64 或多架构 Dockerfile。
 5. [x] 编写 `.github/workflows/build-and-push-image.yaml`。
-6. 本地构建镜像并启动容器验证 LiteLLM。
+6. 本地构建镜像并启动容器验证 LiteLLM（当前主机无 Docker daemon，保留到 CI/目标节点验证）。
 7. 通过 GitHub Actions 构建并推送第一版镜像；首次 Bootstrap 不调用 `repository_dispatch`。
 8. 将第一版镜像推送到可被 K3s 节点访问的 GHCR 仓库。
-9. 完成 LiteLLM Application 的 ConfigMap、ExternalSecret 引用、Deployment 和 Service values。
-10. 在 `my-argocd-manifests` Repo 中创建 LiteLLM 的 ArgoCD Application：
+9. [x] 完成 LiteLLM Application 的 ConfigMap、Secret 引用、Deployment 和 Service values。
+10. [x] 在 `my-argocd-manifests` Repo 中创建 LiteLLM 的 ArgoCD Application：
 
    ```text
    my-argocd-manifests/argocd-apps/litellm-svc-app.yaml
@@ -1110,8 +1118,8 @@ Phase 1 路由设计需要明确：
 
    该文件至少需要定义镜像 Repository、初始 image digest、Helm Chart 来源、目标集群、Namespace、Service 参数和 Kong 路由参数。初始 `image.digest` 必须使用一个已经存在于 GHCR 的 Manifest Index digest，不能使用尚未推送的值。
 
-11. 确认 `svc_name=litellm-svc` 会映射到该文件，使 `update-app-image-digest.yml` 能够正确更新它。
-12. 用 `helm template`、YAML 校验和 ArgoCD manifest 检查清单。
+11. [x] 确认 `svc_name=litellm-svc` 会映射到该文件，使 `update-app-image-digest.yml` 能够正确更新它。
+12. [x] 用 `helm template` 和 workflow 输入校验检查清单；ArgoCD 首次同步检查仍待执行。
 
 阶段 A 交付物：
 
@@ -1120,8 +1128,8 @@ Phase 1 路由设计需要明确：
 - [x] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
 - [x] 已构建并推送的 ARM64 或多架构镜像。
 - [x] 镜像完整地址、版本标签和构建记录。
-- [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
-- [ ] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
+- [x] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
+- [x] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
 - [ ] OCI Vault Secret 名称清单和创建记录；不保存真实值。
 - [ ] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
 - [ ] ESO bootstrap Secret `oci-litellm-vault-reader` 的安全创建记录；不保存私钥明文。
