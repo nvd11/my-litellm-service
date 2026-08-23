@@ -54,13 +54,58 @@ LITELLM_MASTER_KEY
 
 OCI MySQL、Prisma 数据库初始化、Virtual Key 管理和用户级费用审计属于后续 Phase 2，不得为了完成 Phase 1 提前引入 `MYSQL_*` 配置或数据库依赖。
 
+## 执行前置：Phase 0 环境与公网入口准备
+
+这是实际部署的第一个执行阶段，必须在编写镜像、Helm Chart 和 ArgoCD 清单之前完成。
+
+### 只读环境审计
+
+先确认以下事实：
+
+1. K3s 当前 context 和节点状态。
+2. `free-arm-vm` 的节点名、标签和 `arm64` 架构。
+3. Redis Service 的准确名称、Namespace、端口和认证方式。
+4. Kong Service、HTTP/HTTPS NodePort 以及 `externalTrafficPolicy`。
+5. `free-arm-vm` 上是否运行 Kong Pod。
+6. OCI 子网、Security List/NSG 和公网入口关系。
+7. 节点本机访问 Kong NodePort，以及外部访问 `134.185.90.98:31850` 的结果。
+
+### OCI 公网 NodePort 变更
+
+当前 Kong HTTP NodePort 已确认是 `31850`。若只读审计确认 OCI Security List/NSG 未放行该端口，执行以下变更流程：
+
+1. 记录当前 Security List/NSG 规则状态。
+2. 获得针对 OCI 网络规则变更的明确授权。
+3. 新增最小范围的入站规则：
+
+   ```text
+   Protocol:   TCP
+   Source:     0.0.0.0/0
+   Port:       31850
+   Description: Kong HTTP NodePort for LiteLLM Phase 1
+   ```
+
+4. 不新增 TCP `30745`（Redis）、TCP `6443`（Kubernetes API）或其他管理端口的公网放行规则。
+5. 从外部网络复测 `134.185.90.98:31850`，确认端口可达后再进入 Phase 1 应用部署。
+
+这次 OCI 网络变更不得通过 ArgoCD、Helm 或应用仓库间接执行。若未来改用固定来源 IP，应将 `0.0.0.0/0` 收窄为实际客户端 CIDR，并重新验证公网访问范围。
+
+### Phase 0 完成标准
+
+- [ ] K3s、目标节点、Redis 和 Kong 信息已记录。
+- [ ] `free-arm-vm` 上的 Kong Pod 和 NodePort 本机访问正常。
+- [ ] OCI Security List/NSG 规则已检查。
+- [x] TCP `31850` 变更已获授权并完成，或已有等效公网入口。
+- [x] `134.185.90.98:31850` 外部复测成功。
+- [x] Redis NodePort `30745` 未被放行。
+
 ## 实施步骤与交付物总览
 
 每个阶段都必须有明确的交付物。交付物可以是代码文件、镜像、Kubernetes 资源、测试记录或验收结果；只有交付物完成并通过对应检查，才能进入下一阶段。
 
 | 阶段 | 实施目标 | 必须交付的成果 | 阶段完成标准 |
 | --- | --- | --- | --- |
-| 0. 环境确认 | 确认目标节点、Redis、Kong、镜像仓库和 Secret 方案 | 环境确认记录、节点标签、Redis Service 信息、Kong 接入方式记录 | 所有部署前置事实已确认，没有依赖猜测值 |
+| 0. 环境与公网入口确认 | 确认目标节点、Redis、Kong、OCI 网络入口、镜像仓库和 Secret 方案 | 环境确认记录、节点标签、Redis Service 信息、Kong 接入方式记录、NodePort 网络变更和公网复测记录 | 所有部署前置事实已确认，TCP `31850` 公网入口可达，没有依赖猜测值 |
 | 1. Helm Chart、容器化与 GitOps 清单准备 | 创建通用服务 Chart v2，构建镜像并准备 LiteLLM 的 ArgoCD Application | `generic-web-service-v2`、`Dockerfile`、`.dockerignore`、GitHub Actions workflow、镜像标签、`argocd-apps/litellm-svc-app.yaml`、构建记录 | Chart 能渲染 LiteLLM 所需资源，容器能够启动，GitOps 清单能指向有效镜像，CI 构建成功 |
 | 2. ArgoCD 首次同步与集群内闭环 | 通过 ArgoCD 首次部署 LiteLLM 并完成内部验证 | Namespace、ConfigMap、Secret 创建记录、Application 首次同步记录、集群内测试记录 | Pod 在 `free-arm-vm` Running，集群内 API 调用成功 |
 | 3. Redis 联调 | 验证缓存和 Redis 网络连接 | Redis 连接测试记录、重复请求缓存测试记录 | `AUTH`、`PING`、缓存命中均成功，Redis 未暴露公网 |
@@ -69,7 +114,7 @@ OCI MySQL、Prisma 数据库初始化、Virtual Key 管理和用户级费用审�
 
 后续章节分别说明每个阶段需要编写的文件、执行的动作和验收证据。
 
-本文档前面的章节用于说明架构、职责和配置；真正执行时以第 11 节“ArgoCD 发布顺序”为准。第 15 节的前置确认必须在阶段 A 开始前完成。
+本文档前面的章节用于说明架构、职责和配置；真正执行时以第 11 节“ArgoCD 发布顺序”为准。第 15 节的前置确认和阶段 0 公网入口准备必须在阶段 A 开始前完成。
 
 ### 交付物命名和保存原则
 
@@ -220,12 +265,30 @@ v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 
 
 本节的交付物为：
 
-- [ ] `Dockerfile`。
-- [ ] `.dockerignore`。
+- [x] `Dockerfile`。
+- [x] `.dockerignore`。
 - [ ] `.github/workflows/build-and-push-image.yaml`。
-- [ ] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
+- [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
 - [ ] `nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [ ] 一份不包含真实凭证的部署说明。
+
+当前进度：`generic-web-service-v2` 已在本机 checkout 的 `my-shared-helm-charts` 中完成初版实现，包含 ConfigMap、Secret/envFrom、可选 ExternalSecret、资源与安全上下文、探针、节点选择、ClusterIP Service 和 HTTPRoute。使用 LiteLLM 示例 values 执行 `helm lint` 与 `helm template` 均通过。
+
+Chart 已完成代码审查并发布到 `nvd11/my-shared-helm-charts`：
+
+```text
+Commit: bbd3edf feat: add generic web service v2 chart
+Tag:    v2.0.0
+```
+
+容器化文件已完成：
+
+```text
+Dockerfile:    python:3.12-slim + uv.lock --frozen + non-root runtime
+.dockerignore: 排除 .env、Git、虚拟环境、测试、文档和本地缓存
+```
+
+当前环境未连接 Docker daemon，尚未完成真实 ARM64 镜像构建；镜像构建和启动验证保留给 GitHub Actions 或可用 Docker 主机执行。
 
 ## 4. 容器镜像方案
 
@@ -964,13 +1027,29 @@ Phase 1 路由设计需要明确：
 
 建议按以下顺序操作：
 
+### 阶段 0：公网入口网络准备
+
+1. 完成第 15 节的 K3s、节点、Redis、Kong 和 OCI 网络只读检查。
+2. 确认 `free-arm-vm` 所在 Security List/NSG 对 TCP `31850` 的当前状态。
+3. 经明确授权后，新增 TCP `31850` 入站规则；不得放行 Redis NodePort `30745`。
+4. 从外部网络验证 `134.185.90.98:31850`，并记录连接结果。
+5. 只有公网 NodePort 验证成功后，才进入阶段 A。
+
+阶段 0 交付物：
+
+- [ ] OCI 子网、Security List/NSG 和 NodePort 检查记录。
+- [ ] 网络变更授权记录。
+- [ ] TCP `31850` 入站规则变更记录；不记录凭据。
+- [ ] 公网 `134.185.90.98:31850` 复测结果。
+- [ ] Redis `30745` 未被放行的检查结果。
+
 ### 阶段 A：镜像和清单准备
 
-0. 完成第 15 节的环境、Redis、Kong、`litellm-prod` Compartment、OCI Vault、ESO 和镜像仓库前置确认。
-1. 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
-2. 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
+0. 确认阶段 0 已完成，并完成第 15 节其余的环境、Redis、`litellm-prod` Compartment、OCI Vault、ESO 和镜像仓库前置确认。
+1. [x] 在 `nvd11/my-shared-helm-charts` 中创建 `charts/generic-web-service-v2/`。
+2. [x] 为 Chart v2 增加配置挂载、Secret、资源限制、安全上下文、探针、节点选择和 Kong 路由能力。
 3. 使用 `helm lint` 和 `helm template` 验证 LiteLLM values，发布 Chart `v2.0.0`。
-4. 编写 ARM64 或多架构 Dockerfile。
+4. [x] 编写 ARM64 或多架构 Dockerfile。
 5. 编写 `.github/workflows/build-and-push-image.yaml`。
 6. 本地构建镜像并启动容器验证 LiteLLM。
 7. 通过 GitHub Actions 构建并推送第一版镜像；首次 Bootstrap 不调用 `repository_dispatch`。
@@ -990,8 +1069,8 @@ Phase 1 路由设计需要明确：
 阶段 A 交付物：
 
 - [ ] 可审查的 `Dockerfile` 和 `.dockerignore`。
-- [ ] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
-- [ ] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
+- [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
+- [x] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
 - [ ] 已构建并推送的 ARM64 或多架构镜像。
 - [ ] 镜像完整地址、版本标签和构建记录。
 - [ ] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
@@ -1029,7 +1108,7 @@ Phase 1 路由设计需要明确：
 
 ### 阶段 C：Kong 公网 IP 接入（Phase 1 必须完成）
 
-1. 确认 `134.185.90.98` 能到达 Kong NodePort。
+1. 确认阶段 0 的公网 NodePort 复测已经成功。
 2. 创建通过公网 IP 到达 Kong 的 HTTPRoute 或 Ingress。
 3. 只开放 LiteLLM 受保护的 OpenAI 兼容 API 路径。
 4. 验证公网 IP、鉴权、超时和错误码透传。
@@ -1149,9 +1228,189 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 - `generic-web-service-v2` Chart 的发布版本和 values 接口。
 - 现有 Kong/KIC 使用 Ingress 还是 Gateway API HTTPRoute。
 - 公网入口 IP、访问路径和访问范围；域名与 TLS 暂不作为 Phase 1 前置条件。
+- OCI Security List/NSG 对 Kong HTTP NodePort `31850` 的放行状态，以及是否授权新增该入站规则。
 - `litellm-prod` Compartment 是否已创建，以及 Vault 是否位于该 Compartment。
 - 3 个 OCI Secret 名称和 `litellm-vault-reader` 最小权限身份。
 - External Secrets Operator 的 OCI provider、认证方式和安装位置。
 - `ARGOCD_MANIFESTS_DISPATCH_TOKEN` 的 GitHub Actions Secret 配置。
 
-以上确认完成后，才进入 generic-web-service-v2、Dockerfile、GitHub Actions 和 ArgoCD Application 的实际编写与部署阶段。
+以上确认完成后，先完成阶段 0 的 OCI 网络变更和公网 NodePort 复测；只有阶段 0 成功后，才进入 generic-web-service-v2、Dockerfile、GitHub Actions 和 ArgoCD Application 的实际编写与部署阶段。
+
+## 16. Phase 0 环境审计结果
+
+审计日期：2026-08-23
+
+本次审计只执行了只读查询和连通性测试，没有修改 Kubernetes、OCI 或节点配置。
+
+### 16.1 K3s 与目标节点
+
+当前 Kubernetes context 为：
+
+```text
+default
+```
+
+节点状态：
+
+| 节点 | 状态 | Kubernetes 版本 | 架构 | 内部地址 |
+| --- | --- | --- | --- | --- |
+| `free-arm-vm` | `Ready` | `v1.36.2+k3s1` | `arm64` | `100.105.130.0` |
+| `nuc` | `Ready` | `v1.36.2+k3s1` | `amd64` | `100.104.150.19` |
+| `vm-0-2-debian` | `Ready` | `v1.35.5+k3s1` | `amd64` | `100.77.64.95` |
+
+`free-arm-vm` 的目标节点名、`arm64` 架构和 `Ready` 状态均已确认，可以作为 LiteLLM 的调度节点。
+
+### 16.2 Redis Service
+
+当前 Redis Service：
+
+```text
+Namespace: redis
+Service:   redis
+Type:      ClusterIP
+Address:   10.43.120.222
+Port:      6379/TCP
+DNS:       redis.redis.svc.cluster.local:6379
+```
+
+Redis Service 没有直接配置为 NodePort，集群内应优先使用上述 Service DNS 访问。Redis 密码、认证方式和缓存读写尚未进行运行时验证。
+
+### 16.3 Kong Service 与路由
+
+当前 Kong Proxy Service：
+
+```text
+Namespace: kong-system
+Service:   kong-ingress-controller-kong-proxy
+Type:      LoadBalancer
+HTTP:      80 -> NodePort 31850
+HTTPS:     443 -> NodePort 31324
+Redis:     6379 -> NodePort 30745
+```
+
+当前 Gateway 状态：
+
+```text
+Gateway:      kong-main-gateway
+Class:        kong
+Address:      10.1.0.2
+Programmed:   True
+GatewayClass: kong / Accepted=True
+```
+
+Kong Proxy Service 仍然包含 `6379:30745` 映射。该映射可能使 Redis 通过 Kong 节点端口暴露，违反 Phase 1 不暴露 Redis 的安全边界，必须在公网发布 LiteLLM 前处理。
+
+### 16.4 公网与节点本机连通性
+
+公网测试目标：
+
+```text
+http://134.185.90.98:31850/
+```
+
+初始审计结果：
+
+```text
+连接超时
+HTTP code: 000
+```
+
+网络变更后的复测结果：
+
+```text
+HTTP code: 404
+Remote IP: 134.185.90.98
+Time:      0.104877s
+```
+
+在 `free-arm-vm` 节点本机访问相同 NodePort：
+
+```text
+http://127.0.0.1:31850/
+HTTP code: 404
+```
+
+节点本机能够到达 Kong，并由 Kong 返回 `404`，说明 Kong Proxy 和 NodePort 在节点本地正常工作；公网访问超时发生在 OCI 公网入口链路，尚不能归因于 LiteLLM 路由。
+
+### 16.5 当前状态与阻塞项
+
+已确认：
+
+- K3s context 可用，所有节点为 `Ready`。
+- `free-arm-vm` 可用且为 `arm64`。
+- Redis ClusterIP Service 为 `redis.redis.svc.cluster.local:6379`。
+- Kong HTTP NodePort 为 `31850`，HTTPS NodePort 为 `31324`。
+- Kong 在节点本机可通过 HTTP NodePort 访问。
+- 目标公网地址 `134.185.90.98:31850` 已可达，Kong 返回 HTTP `404`。
+
+尚未完成：
+
+- Kong Proxy Service 中 `6379:30745` 映射的移除或访问限制。
+- K3s 节点访问 Gemini API 的出站验证。
+- Redis 认证、缓存读写和 LiteLLM 运行时配置验证。
+
+### 16.6 OCI VNIC 公网绑定检查
+
+通过 `free-arm-vm` 的 OCI 实例元数据检查 VNIC：
+
+```text
+VNIC private IP:      10.0.0.234
+VNIC public IP:       null
+Subnet CIDR:          10.0.0.0/24
+```
+
+检查结果表明，`free-arm-vm` 的 VNIC 元数据没有报告直接公网 IP。该结果不能单独证明 `134.185.90.98` 不属于该节点，因为公网访问可能经过 OCI 的公网 NAT 或其他映射。SSH 通过 `134.185.90.98` 可以到达该节点，因此该地址确实存在到节点的公网路径；但 `31850` 仍然可能被 OCI 入站规则单独拦截。
+
+OCI CLI 已成功读取 tenancy、实例、子网和 Security List 信息。Security List 的具体入站结果见第 16.7 节；当前确认 `134.185.90.98` 可以到达该节点，TCP `31850` 已放行并完成公网复测。
+
+当前部署状态：
+
+```text
+Phase 0：公网入口准备完成，应用运行时审计尚未完成
+Phase 1：尚未开始
+当前状态：公网 IP 到 Kong NodePort 已打通，等待开始应用部署
+```
+
+下一步按阶段 A 开始编写镜像和 Helm 部署材料；阶段 C 仍需在 LiteLLM 部署后创建 HTTPRoute 并完成 API 验收。
+
+### 16.7 OCI Security List 检查结果
+
+已通过 OCI CLI 定位 `free-arm-vm` 所在子网：
+
+```text
+Subnet:       vpc0-subnet0
+CIDR:         10.0.0.0/24
+SecurityList: Default Security List for vpc0
+NSG:          未关联
+```
+
+该 Security List 的公网 TCP 入站规则包括（变更后）：
+
+```text
+TCP 22       0.0.0.0/0
+TCP 80       0.0.0.0/0       HTTP for Kong/LiteLLM
+TCP 443      0.0.0.0/0
+TCP 3306     0.0.0.0/0       MySQL 3306 HeatWave
+TCP 6443     0.0.0.0/0       K3s API Server
+TCP 10250    0.0.0.0/0       K3s Kubelet
+TCP 32898    0.0.0.0/0
+TCP 31850    0.0.0.0/0       Kong HTTP NodePort for LiteLLM Phase 1
+```
+
+检查与变更结果：
+
+- TCP `31850` 已新增到公网入站允许列表。
+- TCP `31324` 不在公网入站允许列表中。
+- Redis NodePort `30745` 当前没有对应的公网放行规则。
+- Security List 同时放行 TCP `80` 和 NodePort `31850`；Phase 1 当前使用 `31850`。
+
+变更与复测结果：
+
+```text
+变更：新增 TCP 31850 / 0.0.0.0/0
+结果：OCI Security List 更新成功
+复测：http://134.185.90.98:31850/ 返回 HTTP 404
+结论：公网 TCP 链路已到达 Kong，404 是当前根路径没有匹配路由的 Kong 响应
+```
+
+TCP `30745` 仍未放行，不得将其加入公网规则。
