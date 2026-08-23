@@ -792,6 +792,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
+  - model_name: gemini-3.7-flash
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
 
 litellm_settings:
   cache: true
@@ -860,7 +864,7 @@ Deployment 需要完成以下注入：
 
 - `hostNetwork: true`。
 - `hostPort`。
-- NodePort。
+- LiteLLM Service 不使用 NodePort；公网流量由现有 Kong Service 的 NodePort 接收。
 - 将 Secret 直接写进 Deployment YAML。
 
 ## 8. Service 设计
@@ -903,6 +907,22 @@ ModuleNotFoundError: No module named 'prisma'
 
 ## 10. Kong/KIC 接入方案
 
+Phase 1 固定采用方案 A：使用 OCI `free-arm-vm` 自身的公网 IP，通过现有 Kong Service 的 NodePort 接入，不创建额外的 OCI Load Balancer。
+
+```text
+OCI free-arm-vm 公网 IP
+    ↓
+Kong NodePort（HTTP/HTTPS）
+    ↓
+现有 Kong Gateway
+    ↓
+HTTPRoute/Ingress
+    ↓
+litellm.llm-system.svc.cluster.local:4000
+```
+
+LiteLLM 本身仍然只使用 ClusterIP Service。公网入口属于 Kong，不属于 LiteLLM Service。
+
 LiteLLM 部署并在集群内验证成功后，通过现有 Kong/KIC 增加公网 IP 可访问的 HTTPRoute 或 Ingress：
 
 ```text
@@ -919,6 +939,14 @@ HTTPRoute/Ingress
 litellm.llm-system.svc.cluster.local:4000
 ```
 
+当前计划中的 OCI `free-arm-vm` 公网入口为：
+
+```text
+134.185.90.98
+```
+
+实际访问端口以集群中 Kong Service 的 NodePort 配置为准。必须在 OCI Security List/NSG、VM 防火墙和相关网络规则中放行 LiteLLM 所需的 HTTP 测试端口；Redis NodePort 不得放行公网访问。
+
 Phase 1 路由设计需要明确：
 
 - 公网 IP 入口和明确的路径前缀。
@@ -929,6 +957,8 @@ Phase 1 路由设计需要明确：
 域名、TLS 终止和证书来源不作为 Phase 1 前置条件，后续再补充正式 HTTPS 接入。
 
 不通过 Kong 暴露 Redis，不创建 Redis 公网入口，也不把 LiteLLM 的管理接口无保护地暴露给同事或公网。
+
+方案 B（OCI Load Balancer）作为后续正式对外服务的升级方案保留。OCI Always Free 当前包含 1 个普通 Load Balancer（10 Mbps）和 1 个 Flexible Network Load Balancer，但 Phase 1 不创建额外 Load Balancer。
 
 ## 11. ArgoCD 发布顺序
 
@@ -999,8 +1029,8 @@ Phase 1 路由设计需要明确：
 
 ### 阶段 C：Kong 公网 IP 接入（Phase 1 必须完成）
 
-1. 确认现有 Kong/KIC 的公网 IP 入口可达。
-2. 创建通过公网 IP 匹配的 HTTPRoute 或 Ingress。
+1. 确认 `134.185.90.98` 能到达 Kong NodePort。
+2. 创建通过公网 IP 到达 Kong 的 HTTPRoute 或 Ingress。
 3. 只开放 LiteLLM 受保护的 OpenAI 兼容 API 路径。
 4. 验证公网 IP、鉴权、超时和错误码透传。
 5. 验证公网 `/v1/models`。
@@ -1012,7 +1042,7 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 阶段 C 交付物：
 
 - [ ] HTTPRoute 或 Ingress 清单。
-- [ ] 公网 IP、Kong upstream 和路由配置记录。
+- [ ] `134.185.90.98`、Kong NodePort、upstream 和路由配置记录。
 - [ ] 公网 `/v1/models` 测试结果。
 - [ ] 公网 `/v1/chat/completions` 测试结果。
 - [ ] 401、429、5xx、超时等错误路径测试记录。
@@ -1052,7 +1082,7 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 
 - [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/models` 返回模型列表。
 - [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/chat/completions` 返回标准 OpenAI 格式。
-- [ ] 返回中的 `model` 为 `gemini-3.6-flash-freelayer`。
+- [ ] 返回中的 `model` 为 `gemini-3.6-flash-freelayer` 或 `gemini-3.7-flash`。
 - [ ] Gemini 429、5xx 和超时能够被日志识别。
 - [ ] 失败时不会把 Gemini Provider Key 返回给客户端。
 
@@ -1114,7 +1144,7 @@ Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Ma
 - `free-arm-vm` 的实际节点标签。
 - Redis Service 的准确名称、Namespace、端口和认证方式。
 - K3s 节点能否直接访问 Gemini API。
-- 最终 Gemini 模型名称，目前计划为 `gemini-3.6-flash`。
+- Gemini 模型配置为 `gemini-3.6-flash-freelayer` 和 `gemini-3.7-flash`。
 - 镜像仓库地址 `ghcr.io/nvd11/my-litellm-svc` 以及 ARM64 构建结果。
 - `generic-web-service-v2` Chart 的发布版本和 values 接口。
 - 现有 Kong/KIC 使用 Ingress 还是 Gateway API HTTPRoute。

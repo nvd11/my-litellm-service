@@ -6,6 +6,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
+  - model_name: gemini-3.7-flash-freelayer
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
 
 litellm_settings:
   cache: true
