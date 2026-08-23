@@ -76,3 +76,39 @@ jobs:
             echo '- Manifest digest: `${{ steps.build.outputs.digest }}`'
             echo '- Commit: `${{ github.sha }}`'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update GitOps image digest
+        if: ${{ vars.ENABLE_GITOPS_DIGEST_DISPATCH == 'true' }}
+        env:
+          DISPATCH_TOKEN: ${{ secrets.ARGOCD_MANIFESTS_DISPATCH_TOKEN }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DISPATCH_TOKEN" ]]; then
+            echo "ARGOCD_MANIFESTS_DISPATCH_TOKEN is required when GitOps dispatch is enabled" >&2
+            exit 1
+          fi
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Unexpected manifest digest format: $IMAGE_DIGEST" >&2
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          http_status="$(curl --silent --show-error --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --url https://api.github.com/repos/nvd11/my-argocd-manifests/dispatches \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $DISPATCH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "$(jq -n \
+              --arg digest "$IMAGE_DIGEST" \
+              '{event_type:"update-app-image-digest",client_payload:{svc_name:"litellm-svc",image_digest:$digest}}')")"
+
+          echo "GitOps dispatch HTTP status: $http_status"
+          echo "GitOps digest: $IMAGE_DIGEST"
+          if [[ "$http_status" != "204" ]]; then
+            cat "$response_file" >&2
+            exit 1
+          fi
