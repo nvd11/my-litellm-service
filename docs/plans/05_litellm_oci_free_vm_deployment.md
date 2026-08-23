@@ -92,9 +92,9 @@ OCI MySQL、Prisma 数据库初始化、Virtual Key 管理和用户级费用审�
 
 ### Phase 0 完成标准
 
-- [ ] K3s、目标节点、Redis 和 Kong 信息已记录。
-- [ ] `free-arm-vm` 上的 Kong Pod 和 NodePort 本机访问正常。
-- [ ] OCI Security List/NSG 规则已检查。
+- [x] K3s、目标节点、Redis 和 Kong 信息已记录。
+- [x] `free-arm-vm` 上的 Kong Pod 和 NodePort 本机访问正常。
+- [x] OCI Security List/NSG 规则已检查。
 - [x] TCP `31850` 变更已获授权并完成，或已有等效公网入口。
 - [x] `134.185.90.98:31850` 外部复测成功。
 - [x] Redis NodePort `30745` 未被放行。
@@ -148,7 +148,7 @@ Repo: my-argocd-manifests
 | Docker 构建排除规则 | `nvd11/my-litellm-service` | `/.dockerignore` | 否 |
 | GitHub Actions 镜像工作流 | `nvd11/my-litellm-service` | `/.github/workflows/build-and-push-image.yaml` | 否；只引用 GitHub Actions Secrets |
 | 通用服务 Helm Chart v2 | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/` | 否 |
-| Helm Chart v2 发布版本 | `nvd11/my-shared-helm-charts` | Git tag，例如 `v2.0.0` | 否 |
+| Helm Chart v2 发布版本 | `nvd11/my-shared-helm-charts` | Git tag：`v2.1.0` | 否 |
 | Python 依赖和版本约束 | `nvd11/my-litellm-service` | `/pyproject.toml`、`/uv.lock` | 否；锁文件只记录依赖版本 |
 | LiteLLM 模型配置 | `nvd11/my-litellm-service` | `/config.yaml` | 否；只使用 `os.environ/...` 引用 |
 | 环境变量模板 | `nvd11/my-litellm-service` | `/.env.example` | 否；只使用占位值 |
@@ -159,7 +159,7 @@ Repo: my-argocd-manifests
 | LiteLLM ClusterIP Service | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/service.yaml` | 否 |
 | Kong HTTPRoute | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/httproute.yaml` | 否；TLS 私钥不提交 |
 | OCI Compartment | OCI IAM | 专用 Compartment：`litellm-prod` | OCI 资源边界，不进入应用 Git |
-| OCI Vault Secret | OCI Secret Management Service | `litellm-prod` 中 Vault 的 `litellm/openai-api-key-free-1`、`litellm/master-key`、`litellm/redis-password` | 真实值不进入 Git |
+| OCI Vault Secret | OCI Secret Management Service | `litellm-prod` 中 Vault 的 `litellm-openai-api-key-free-1`、`litellm-master-key`、`litellm-redis-password` | 真实值不进入 Git |
 | OCI Vault 读取身份 | OCI IAM | `litellm-vault-reader` User、`litellm-vault-readers` Group 及最小权限 Policy，作用域为 `litellm-prod` | 私钥不进入 Git |
 | ESO OCI 认证 Bootstrap Secret | K3s Kubernetes Secret | `llm-system/oci-litellm-vault-reader`；与命名空间级 `SecretStore` 同 Namespace | 集群外创建，不进入 Git |
 | ExternalSecret 模板 | `nvd11/my-shared-helm-charts` | `/charts/generic-web-service-v2/templates/externalsecret.yaml` | 不包含真实值 |
@@ -206,7 +206,7 @@ my-shared-helm-charts
 ```text
 Repo: nvd11/my-shared-helm-charts
 Path: charts/generic-web-service-v2/
-Release: v2.0.0
+Release: v2.1.0
 ```
 
 建议目录：
@@ -244,7 +244,7 @@ LiteLLM 的 ArgoCD Application 使用 v2 Chart：
 source:
   repoURL: https://github.com/nvd11/my-shared-helm-charts.git
   path: charts/generic-web-service-v2
-  targetRevision: v2.0.0
+  targetRevision: v2.1.0
 ```
 
 v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 文件验证渲染结果。未发布并验证 v2 之前，不进入 LiteLLM 的首次 ArgoCD Bootstrap。
@@ -269,8 +269,8 @@ v2 发布前必须使用 `helm lint`、`helm template` 和一份 LiteLLM values 
 - [x] `.dockerignore`。
 - [x] `.github/workflows/build-and-push-image.yaml`。
 - [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
-- [ ] `nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
-- [ ] 一份不包含真实凭证的部署说明。
+- [x] `nvd11/my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
+- [x] 一份不包含真实凭证的部署说明。
 
 当前进度：`generic-web-service-v2` 已在本机 checkout 的 `my-shared-helm-charts` 中完成初版实现，包含 ConfigMap、Secret/envFrom、可选 ExternalSecret、资源与安全上下文、探针、节点选择、ClusterIP Service 和 HTTPRoute。使用 LiteLLM 示例 values 执行 `helm lint` 与 `helm template` 均通过。
 
@@ -279,6 +279,13 @@ Chart 已完成代码审查并发布到 `nvd11/my-shared-helm-charts`：
 ```text
 Commit: bbd3edf feat: add generic web service v2 chart
 Tag:    v2.0.0
+
+Digest pinning update:
+
+```text
+Commit: 0893308 feat: support digest-pinned images in generic web service v2
+Tag:    v2.1.0
+```
 ```
 
 容器化文件已完成：
@@ -656,9 +663,9 @@ Region: ap-singapore-1
 Tenancy
 └── litellm-prod
     └── LiteLLM Vault
-        ├── litellm/openai-api-key-free-1
-        ├── litellm/master-key
-        └── litellm/redis-password
+        ├── litellm-openai-api-key-free-1
+        ├── litellm-master-key
+        └── litellm-redis-password
 ```
 
 创建顺序：
@@ -675,9 +682,9 @@ Tenancy
 Phase 1 的真实运行时密钥统一保存在 OCI Secret Management Service（OCI Vault）中：
 
 ```text
-OCI Secret: litellm/openai-api-key-free-1 -> OPENAI_API_KEY_FREE_1
-OCI Secret: litellm/master-key            -> LITELLM_MASTER_KEY
-OCI Secret: litellm/redis-password         -> REDIS_PASSWORD
+OCI Secret: litellm-openai-api-key-free-1 -> OPENAI_API_KEY_FREE_1
+OCI Secret: litellm-master-key            -> LITELLM_MASTER_KEY
+OCI Secret: litellm-redis-password        -> REDIS_PASSWORD
 ```
 
 OCI 资源已实际创建（2026-08-24）：
@@ -793,7 +800,7 @@ spec:
   data:
     - secretKey: LITELLM_MASTER_KEY
       remoteRef:
-        key: litellm/master-key
+        key: litellm-master-key
 ```
 
 `OPENAI_API_KEY_FREE_1` 和 `REDIS_PASSWORD` 使用相同的 `data` 映射继续加入。OCI Vault 中的 Secret 名称和 Kubernetes Secret 字段名称可以不同。
@@ -1141,15 +1148,15 @@ Phase 1 路由设计需要明确：
 
 阶段 A 交付物：
 
-- [ ] 可审查的 `Dockerfile` 和 `.dockerignore`。
+- [x] 可审查的 `Dockerfile` 和 `.dockerignore`。
 - [x] `nvd11/my-shared-helm-charts/charts/generic-web-service-v2/`。
-- [x] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.0.0` 发布记录。
+- [x] Chart v2 的 `helm lint`、`helm template` 结果和 `v2.1.0` 发布记录。
 - [x] 已构建并推送的 ARM64 或多架构镜像。
 - [x] 镜像完整地址、版本标签和构建记录。
 - [x] `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`。
 - [x] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
-- [ ] OCI Vault Secret 名称清单和创建记录；不保存真实值。
-- [ ] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
+- [x] OCI Vault Secret 名称清单和创建记录；不保存真实值。
+- [x] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
 - [ ] ESO bootstrap Secret `oci-litellm-vault-reader` 的安全创建记录；不保存私钥明文。
 - [ ] External Secrets Operator、OCI provider 和认证方案验证记录。
 - [ ] `ExternalSecret` 到 `llm-system/litellm-secrets` 的字段映射验证。
@@ -1157,7 +1164,7 @@ Phase 1 路由设计需要明确：
 
 ### 阶段 B：ArgoCD 首次同步与集群内最小闭环
 
-1. 通过安全流程创建 `litellm-prod` Compartment、Vault 和 3 个 OCI Secret。
+1. [x] 通过安全流程创建 `litellm-prod` Compartment、Vault 和 3 个 OCI Secret。
 2. 通过集群外安全流程创建 ESO bootstrap Secret `oci-litellm-vault-reader`。
 3. 确认 External Secrets Operator 使用该 bootstrap Secret 读取 `litellm-prod` 中的 OCI Vault，并生成 `llm-system/litellm-secrets`。
 4. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
@@ -1439,9 +1446,9 @@ OCI CLI 已成功读取 tenancy、实例、子网和 Security List 信息。Secu
 当前部署状态：
 
 ```text
-Phase 0：公网入口准备完成，应用运行时审计尚未完成
-Phase 1：尚未开始
-当前状态：公网 IP 到 Kong NodePort 已打通，等待开始应用部署
+Phase 0：公网入口准备完成
+Phase 1：镜像、digest GitOps 流程、Chart 和 Application 已准备完成
+当前状态：OCI Vault 已配置，等待 ESO Bootstrap Secret、SecretStore/ExternalSecret 和 ArgoCD 首次同步
 ```
 
 下一步按阶段 A 开始编写镜像和 Helm 部署材料；阶段 C 仍需在 LiteLLM 部署后创建 HTTPRoute 并完成 API 验收。
