@@ -2,14 +2,42 @@
 # Secrets are resolved from environment variables and must not be committed.
 
 model_list:
+  # Gemini 3.6 Flash - Key 1 (Master)
   - model_name: gemini-3.6-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
+      rpm: 15
+
+  # Gemini 3.6 Flash - Key 2 (Secondary / Load Balancing)
+  - model_name: gemini-3.6-flash-freelayer
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_2
+      rpm: 15
+
+  # Gemini 3.7 Flash - Key 1 (Master)
   - model_name: gemini-3.7-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
+      rpm: 15
+
+  # Gemini 3.7 Flash - Key 2 (Secondary / Load Balancing)
+  - model_name: gemini-3.7-flash-freelayer
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_2
+      rpm: 15
+
+router_settings:
+  routing_strategy: "least-busy"
+  num_retries: 3
+  retry_after: 5
+  cooldown_time: 30
+  fallbacks:
+    - gemini-3.6-flash-freelayer: ["gemini-3.7-flash-freelayer"]
+    - gemini-3.7-flash-freelayer: ["gemini-3.6-flash-freelayer"]
 
 litellm_settings:
   cache: true

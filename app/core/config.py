@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     redis_password: SecretStr
 
     openai_api_key_free_1: SecretStr
+    openai_api_key_free_2: SecretStr | None = None
 
     litellm_master_key: SecretStr
     litellm_port: int = 4000
