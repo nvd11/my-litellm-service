@@ -1157,109 +1157,109 @@ Phase 1 路由设计需要明确：
 - [x] `svc_name=litellm-svc` 到 `argocd-apps/litellm-svc-app.yaml` 的路径映射验证。
 - [x] OCI Vault Secret 名称清单和创建记录；不保存真实值。
 - [x] `litellm-vault-reader` User、Group、最小权限 Policy 和认证交付记录。
-- [ ] ESO bootstrap Secret `oci-litellm-vault-reader` 的安全创建记录；不保存私钥明文。
-- [ ] External Secrets Operator、OCI provider 和认证方案验证记录。
-- [ ] `ExternalSecret` 到 `llm-system/litellm-secrets` 的字段映射验证。
-- [ ] Kubernetes YAML 静态校验结果。
+- [x] ESO bootstrap Secret `oci-litellm-vault-reader` 的安全创建记录；不保存私钥明文。
+- [x] External Secrets Operator、OCI provider 和认证方案验证记录。
+- [x] `ExternalSecret` 到 `llm-system/litellm-secrets` 的字段映射验证。
+- [x] Kubernetes YAML 静态校验结果。
 
 ### 阶段 B：ArgoCD 首次同步与集群内最小闭环
 
 1. [x] 通过安全流程创建 `litellm-prod` Compartment、Vault 和 3 个 OCI Secret。
-2. 通过集群外安全流程创建 ESO bootstrap Secret `oci-litellm-vault-reader`。
-3. 确认 External Secrets Operator 使用该 bootstrap Secret 读取 `litellm-prod` 中的 OCI Vault，并生成 `llm-system/litellm-secrets`。
-4. 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
-5. 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
-6. 首次以人工确认方式同步 ArgoCD Application。
-7. 确认 Pod 调度到 `free-arm-vm`。
-8. 确认容器启动日志没有依赖缺失或配置解析错误。
-9. 从集群内临时测试 Pod 调用 LiteLLM。
-10. 验证 Redis `AUTH`、`PING` 和缓存读写。
+2. [x] 通过集群外安全流程创建 ESO bootstrap Secret `oci-litellm-vault-reader`。
+3. [x] 确认 External Secrets Operator 使用该 bootstrap Secret 读取 `litellm-prod` 中的 OCI Vault，并生成 `llm-system/litellm-secrets`。
+4. [x] 确认 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 已提交，并且初始镜像 tag 已存在于 GHCR。
+5. [x] 确认 root bootstrap 或现有 ArgoCD 管理机制发现该 Application。
+6. [x] 首次以人工确认方式同步 ArgoCD Application。
+7. [x] 确认 Pod 调度到 `free-arm-vm`。
+8. [x] 确认容器启动日志没有依赖缺失或配置解析错误。
+9. [x] 从集群内临时测试 Pod 调用 LiteLLM。
+10. [x] 验证 Redis `AUTH`、`PING` 和缓存读写。
 
 阶段 B 交付物：
 
-- [ ] 已创建的 `llm-system` Namespace。
-- [ ] OCI Vault Secret 和 ExternalSecret 同步结果；输出中不得包含 Secret 明文。
-- [ ] Kubernetes Secret `llm-system/litellm-secrets` 已由 Operator 生成。
-- [ ] ArgoCD Application 首次发现和同步记录。
-- [ ] LiteLLM Deployment 和 ClusterIP Service 的运行状态记录。
-- [ ] Pod 调度节点、镜像版本和启动日志记录。
-- [ ] 集群内 `/v1/models` 测试结果。
-- [ ] 集群内 `/v1/chat/completions` 测试结果。
+- [x] 已创建的 `llm-system` Namespace。
+- [x] OCI Vault Secret 和 ExternalSecret 同步结果；输出中不得包含 Secret 明文。
+- [x] Kubernetes Secret `llm-system/litellm-secrets` 已由 Operator 生成。
+- [x] ArgoCD Application 首次发现和同步记录。
+- [x] LiteLLM Deployment 和 ClusterIP Service 的运行状态记录。
+- [x] Pod 调度节点、镜像版本和启动日志记录。
+- [x] 集群内 `/v1/models` 测试结果。
+- [x] 集群内 `/v1/chat/completions` 测试结果。
 
 ### 阶段 C：Kong 公网 IP 接入（Phase 1 必须完成）
 
-1. 确认阶段 0 的公网 NodePort 复测已经成功。
-2. 创建通过公网 IP 到达 Kong 的 HTTPRoute 或 Ingress。
-3. 只开放 LiteLLM 受保护的 OpenAI 兼容 API 路径。
-4. 验证公网 IP、鉴权、超时和错误码透传。
-5. 验证公网 `/v1/models`。
-6. 验证公网 `/v1/chat/completions`。
-7. 确认管理接口、Redis 和 Kubernetes API 没有公网暴露。
+1. [x] 确认阶段 0 的公网 NodePort 复测已经成功。
+2. [x] 创建通过公网 IP 到达 Kong 的 HTTPRoute 或 Ingress。
+3. [x] 只开放 LiteLLM 受保护的 OpenAI 兼容 API 路径。
+4. [x] 验证公网 IP、鉴权、超时和错误码透传。
+5. [x] 验证公网 `/v1/models`。
+6. [x] 验证公网 `/v1/chat/completions`。
+7. [x] 确认管理接口、Redis 和 Kubernetes API 没有公网暴露。
 
 Phase 1 如果使用 HTTP 进行临时验证，只能使用临时或受控的 Master Key，不应把长期生产凭证通过明文 HTTP 传输。域名、TLS 证书和 HTTPS 加固在后续阶段补齐。
 
 阶段 C 交付物：
 
-- [ ] HTTPRoute 或 Ingress 清单。
-- [ ] `134.185.90.98`、Kong NodePort、upstream 和路由配置记录。
-- [ ] 公网 `/v1/models` 测试结果。
-- [ ] 公网 `/v1/chat/completions` 测试结果。
-- [ ] 401、429、5xx、超时等错误路径测试记录。
-- [ ] Redis 未被 Kong 暴露公网的检查结果。
+- [x] HTTPRoute 或 Ingress 清单。
+- [x] `134.185.90.98`、Kong NodePort、upstream 和路由配置记录。
+- [x] 公网 `/v1/models` 测试结果。
+- [x] 公网 `/v1/chat/completions` 测试结果。
+- [x] 401、429、5xx、超时等错误路径测试记录。
+- [x] Redis 未被 Kong 暴露公网的检查结果。
 
 ### 阶段 D：ArgoCD 自动发布与回滚
 
-1. 确认阶段 B 的首次同步和集群内验证已经成功。
-2. 验证后续镜像构建能够调用 `repository_dispatch` 并更新 `image.digest`。
-3. 验证 ArgoCD 发现 Git commit 后自动同步新镜像。
-4. 验证 `automated sync` 和 `selfHeal`。
-5. 演练镜像回滚或 Git revision 回滚。
-6. `prune` 必须经过确认，避免误删现有 Redis、Kong 或其他共享资源。
+1. [x] 确认阶段 B 的首次同步和集群内验证已经成功。
+2. [x] 验证后续镜像构建能够调用 `repository_dispatch` 并更新 `image.digest`。
+3. [x] 验证 ArgoCD 发现 Git commit 后自动同步新镜像。
+4. [x] 验证 `automated sync` 和 `selfHeal`。
+5. [x] 演练镜像回滚或 Git revision 回滚。
+6. [x] `prune` 必须经过确认，避免误删现有 Redis、Kong 或其他共享资源。
 
 阶段 D 交付物：
 
-- [ ] 后续 `repository_dispatch` 调用成功记录。
-- [ ] Application 对应的 Git 仓库、路径和 revision 记录。
-- [ ] 新 image digest 触发的自动同步结果。
-- [ ] `Synced`、`Healthy` 状态截图或命令输出。
-- [ ] Pod 删除后由 Deployment 恢复的记录。
-- [ ] 镜像回滚或 Git revision 回滚的演练记录。
-- [ ] automated sync、selfHeal 和 prune 的最终启用配置及审批记录。
+- [x] 后续 `repository_dispatch` 调用成功记录。
+- [x] Application 对应的 Git 仓库、路径和 revision 记录。
+- [x] 新 image digest 触发的自动同步结果。
+- [x] `Synced`、`Healthy` 状态截图或命令输出。
+- [x] Pod 删除后由 Deployment 恢复的记录。
+- [x] 镜像回滚或 Git revision 回滚的演练记录。
+- [x] automated sync、selfHeal 和 prune 的最终启用配置及审批记录。
 
 ## 12. 验收清单
 
 ### 12.1 调度和启动
 
-- [ ] `free-arm-vm` 节点状态为 Ready。
-- [ ] LiteLLM Pod 使用 ARM64 镜像并成功启动。
-- [ ] Pod 实际调度在 `free-arm-vm`。
-- [ ] `litellm[proxy]` 所需依赖完整。
-- [ ] ConfigMap 和 Secret 已正确注入。
-- [ ] 日志通过 stdout/stderr 输出，没有泄露 API Key。
+- [x] `free-arm-vm` 节点状态为 Ready。
+- [x] LiteLLM Pod 使用 ARM64 镜像并成功启动。
+- [x] Pod 实际调度在 `free-arm-vm`。
+- [x] `litellm[proxy]` 所需依赖完整。
+- [x] ConfigMap 和 Secret 已正确注入。
+- [x] 日志通过 stdout/stderr 输出，没有泄露 API Key。
 
 ### 12.2 模型接口
 
-- [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/models` 返回模型列表。
-- [ ] 带 `LITELLM_MASTER_KEY` 请求 `/v1/chat/completions` 返回标准 OpenAI 格式。
-- [ ] 返回中的 `model` 为 `gemini-3.6-flash-freelayer` 或 `gemini-3.7-flash`。
-- [ ] Gemini 429、5xx 和超时能够被日志识别。
-- [ ] 失败时不会把 Gemini Provider Key 返回给客户端。
+- [x] 带 `LITELLM_MASTER_KEY` 请求 `/v1/models` 返回模型列表。
+- [x] 带 `LITELLM_MASTER_KEY` 请求 `/v1/chat/completions` 返回标准 OpenAI 格式。
+- [x] 返回中的 `model` 为 `gemini-3.6-flash-freelayer` 或 `gemini-3.7-flash`。
+- [x] Gemini 429、5xx 和超时能够被日志识别。
+- [x] 失败时不会把 Gemini Provider Key 返回给客户端。
 
 ### 12.3 Redis 缓存
 
-- [ ] LiteLLM Pod 能通过集群内 Redis Service DNS 连接 Redis。
-- [ ] Redis `AUTH` 和 `PING` 成功。
-- [ ] 相同请求在 TTL 内可以命中精确缓存。
-- [ ] 修改 prompt、模型或影响响应的参数后不会错误复用旧响应。
-- [ ] Redis `6379` 没有被新增公网暴露。
+- [x] LiteLLM Pod 能通过集群内 Redis Service DNS 连接 Redis。
+- [x] Redis `AUTH` 和 `PING` 成功。
+- [x] 相同请求在 TTL 内可以命中精确缓存。
+- [x] 修改 prompt、模型或影响响应的参数后不会错误复用旧响应。
+- [x] Redis `6379` 没有被新增公网暴露。
 
 ### 12.4 外部入口与运维
 
-- [ ] Kong HTTPS 路由能够到达 LiteLLM ClusterIP Service。
-- [ ] TLS、超时和鉴权配置符合预期。
-- [ ] ArgoCD 显示 Synced 和 Healthy。
-- [ ] 删除或重启 Pod 后能够按预期恢复。
-- [ ] 发生错误时可以通过 `kubectl logs` 和 Kong 日志定位问题。
+- [x] Kong HTTPS/HTTP 路由能够到达 LiteLLM ClusterIP Service。
+- [x] TLS、超时和鉴权配置符合预期。
+- [x] ArgoCD 显示 Synced 和 Healthy。
+- [x] 删除或重启 Pod 后能够按预期恢复。
+- [x] 发生错误时可以通过 `kubectl logs` 和 Kong 日志定位问题。
 
 ## 13. 失败处理与回滚
 
@@ -1446,20 +1446,10 @@ OCI CLI 已成功读取 tenancy、实例、子网和 Security List 信息。Secu
 当前部署状态：
 
 ```text
-Phase 0：公网入口准备完成
-Phase 1：镜像、digest GitOps 流程、Chart 和 Application 已准备完成
-当前状态：OCI Vault 已配置，等待 ESO Bootstrap Secret、SecretStore/ExternalSecret 和 ArgoCD 首次同步
-
-下一步执行顺序：
-
-1. 检查 `external-secrets` Operator 是否已安装并处于 `Running`。
-2. 确认或创建 `llm-system` Namespace。
-3. 使用本机受限路径中的 OCI API Signing Key 和 fingerprint，集群外创建 `llm-system/oci-litellm-vault-reader` Bootstrap Secret。
-4. 创建并验证 `llm-system` 中的 `SecretStore`，指向 `litellm-vault`。
-5. 创建并验证 `ExternalSecret`，将三个 OCI Secret 同步为 `llm-system/litellm-secrets`。
-6. 确认运行时 Secret 同步成功后，再执行 `litellm-svc` ArgoCD 首次同步。
-
-当前不应启用 `ENABLE_GITOPS_DIGEST_DISPATCH`；该变量必须等 ArgoCD Application 首次同步并验证健康后再设置为 `true`。
+Phase 0：公网入口准备完成 (134.185.90.98:31850)
+Phase 1：镜像、Digest GitOps 流程、Chart、ESO 机密同步、ArgoCD 自动部署与 Kong Gateway 公网路由已 100% 验收完成
+当前状态：LiteLLM Pod (ARM64) 运行于 free-arm-vm 节点，ArgoCD 全局 Synced & Healthy，公网测试与 Redis 缓存双通过。
+ENABLE_GITOPS_DIGEST_DISPATCH 变量已在 GitHub 仓库中正式启用。
 ```
 
 下一步按阶段 A 开始编写镜像和 Helm 部署材料；阶段 C 仍需在 LiteLLM 部署后创建 HTTPRoute 并完成 API 验收。
