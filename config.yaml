@@ -2,42 +2,58 @@
 # Secrets are resolved from environment variables and must not be committed.
 
 model_list:
-  # Gemini 3.6 Flash - Key 1 (Master)
+  # === 🟢 梯队一：主力日常轮换组 (Key 1 & Key 2) ===
+  # Gemini 3.6 Flash - Key 1 (Master / Jason)
   - model_name: gemini-3.6-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
       rpm: 15
 
-  # Gemini 3.6 Flash - Key 2 (Secondary / Load Balancing)
+  # Gemini 3.6 Flash - Key 2 (Wife)
   - model_name: gemini-3.6-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_2
       rpm: 15
 
-  # Gemini 3.7 Flash - Key 1 (Master)
+  # Gemini 3.7 Flash - Key 1 (Master / Jason)
   - model_name: gemini-3.7-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
       rpm: 15
 
-  # Gemini 3.7 Flash - Key 2 (Secondary / Load Balancing)
+  # Gemini 3.7 Flash - Key 2 (Wife)
   - model_name: gemini-3.7-flash-freelayer
     litellm_params:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_2
+      rpm: 15
+
+  # === 🛡️ 梯队二：终极应急保底组 (Key 3 专属，平时 0 流量) ===
+  # Gemini 3.6 Flash Backup - Key 3 (Old GCP Project)
+  - model_name: gemini-3.6-backup
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_3
+      rpm: 15
+
+  # Gemini 3.7 Flash Backup - Key 3 (Old GCP Project)
+  - model_name: gemini-3.7-backup
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_3
       rpm: 15
 
 router_settings:
   routing_strategy: "least-busy"
   num_retries: 3
-  retry_after: 5
-  cooldown_time: 30
+  allowed_fails: 1
+  cooldown_time: 60
   fallbacks:
-    - gemini-3.6-flash-freelayer: ["gemini-3.7-flash-freelayer"]
-    - gemini-3.7-flash-freelayer: ["gemini-3.6-flash-freelayer"]
+    - gemini-3.6-flash-freelayer: ["gemini-3.6-backup", "gemini-3.7-flash-freelayer"]
+    - gemini-3.7-flash-freelayer: ["gemini-3.7-backup", "gemini-3.6-flash-freelayer"]
 
 litellm_settings:
   cache: true
