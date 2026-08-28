@@ -12,16 +12,16 @@
 model_list:
   # === 🟢 梯队一：主力日常轮换组 (Key 1 & Key 2 平摊 50/50 负载) ===
   # Gemini 3.7 Flash - Key 1 (Master / Jason)
-  - model_name: gemini-3.7-flash-freelayer
+  - model_name: gemini-3.7-flash
     litellm_params:
-      model: gemini/gemini-3.7-flash
+      model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_1
       rpm: 15
 
   # Gemini 3.7 Flash - Key 2 (Wife)
-  - model_name: gemini-3.7-flash-freelayer
+  - model_name: gemini-3.7-flash
     litellm_params:
-      model: gemini/gemini-3.7-flash
+      model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_2
       rpm: 15
 
@@ -29,7 +29,7 @@ model_list:
   # Gemini 3.7 Flash Pro Plan - Key 4 (Google AI Pro)
   - model_name: gemini-3.7-pro-plan
     litellm_params:
-      model: gemini/gemini-3.7-flash
+      model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_PRO_PLAN
       rpm: 15
 
@@ -37,7 +37,7 @@ model_list:
   # Gemini 3.7 Flash Backup - Key 3 (Old GCP Project)
   - model_name: gemini-3.7-backup
     litellm_params:
-      model: gemini/gemini-3.7-flash
+      model: gemini/gemini-3.6-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_3
       rpm: 15
 
@@ -48,7 +48,7 @@ router_settings:
   cooldown_time: 60
   fallbacks:
     # 🎯 梯队级联降级链：主力组 (FREE_1 + FREE_2) -> Pro Plan 升舱 -> Key 3 终极保底
-    - gemini-3.7-flash-freelayer: ["gemini-3.7-pro-plan", "gemini-3.7-backup"]
+    - gemini-3.7-flash: ["gemini-3.7-pro-plan", "gemini-3.7-backup"]
 
 litellm_settings:
   cache: true
