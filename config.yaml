@@ -43,7 +43,7 @@ model_list:
 
 router_settings:
   routing_strategy: "least-busy"
-  num_retries: 3
+  num_retries: 5
   allowed_fails: 1
   cooldown_time: 60
   fallbacks:
