@@ -1,22 +1,16 @@
-# Phase 1 LiteLLM Proxy configuration.
+# ==============================================================================
+# LiteLLM Proxy Model & Multi-Tier Routing Configuration
+# ==============================================================================
+# Key 角色与梯队定义说明：
+# - OPENAI_API_KEY_FREE_1  : 主力老号 1 (主人) - Tier 1 日常轮换
+# - OPENAI_API_KEY_FREE_2  : 主力老号 2 (师母) - Tier 1 日常轮换
+# - OPENAI_API_KEY_PRO_PLAN: 主力 Google AI Pro 旗舰号 - Tier 2 一级应急升舱
+# - OPENAI_API_KEY_FREE_3  : 终极应急保底号 - Tier 3 终极避震保底
+# ==============================================================================
 # Secrets are resolved from environment variables and must not be committed.
 
 model_list:
-  # === 🟢 梯队一：主力日常轮换组 (Key 1 & Key 2) ===
-  # Gemini 3.6 Flash - Key 1 (Master / Jason)
-  - model_name: gemini-3.6-flash-freelayer
-    litellm_params:
-      model: gemini/gemini-3.6-flash
-      api_key: os.environ/OPENAI_API_KEY_FREE_1
-      rpm: 15
-
-  # Gemini 3.6 Flash - Key 2 (Wife)
-  - model_name: gemini-3.6-flash-freelayer
-    litellm_params:
-      model: gemini/gemini-3.6-flash
-      api_key: os.environ/OPENAI_API_KEY_FREE_2
-      rpm: 15
-
+  # === 🟢 梯队一：主力日常轮换组 (Key 1 & Key 2 平摊 50/50 负载) ===
   # Gemini 3.7 Flash - Key 1 (Master / Jason)
   - model_name: gemini-3.7-flash-freelayer
     litellm_params:
@@ -31,14 +25,15 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY_FREE_2
       rpm: 15
 
-  # === 🛡️ 梯队二：终极应急保底组 (Key 3 专属，平时 0 流量) ===
-  # Gemini 3.6 Flash Backup - Key 3 (Old GCP Project)
-  - model_name: gemini-3.6-backup
+  # === 🟡 梯队二：一级应急升舱组 (Pro Plan 专属，主力 429 时触发) ===
+  # Gemini 3.7 Flash Pro Plan - Key 4 (Google AI Pro)
+  - model_name: gemini-3.7-pro-plan
     litellm_params:
-      model: gemini/gemini-3.6-flash
-      api_key: os.environ/OPENAI_API_KEY_FREE_3
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_PRO_PLAN
       rpm: 15
 
+  # === 🛡️ 梯队三：终极应急保底组 (Key 3 专属，平时 0 流量) ===
   # Gemini 3.7 Flash Backup - Key 3 (Old GCP Project)
   - model_name: gemini-3.7-backup
     litellm_params:
@@ -52,8 +47,8 @@ router_settings:
   allowed_fails: 1
   cooldown_time: 60
   fallbacks:
-    - gemini-3.6-flash-freelayer: ["gemini-3.6-backup", "gemini-3.7-flash-freelayer"]
-    - gemini-3.7-flash-freelayer: ["gemini-3.7-backup", "gemini-3.6-flash-freelayer"]
+    # 🎯 梯队级联降级链：主力组 (FREE_1 + FREE_2) -> Pro Plan 升舱 -> Key 3 终极保底
+    - gemini-3.7-flash-freelayer: ["gemini-3.7-pro-plan", "gemini-3.7-backup"]
 
 litellm_settings:
   cache: true

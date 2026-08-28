@@ -33,7 +33,7 @@ async def test_real_gemini_chat_completion() -> None:
 
     try:
         response = await acompletion(
-            model="gemini/gemini-3.6-flash",
+            model="gemini/gemini-3.7-flash",
             api_key=api_key,
             messages=[{"role": "user", "content": "Reply with exactly: OK"}],
             # max_tokens=64,  # Output token limit; Gemini's maximum is 64K.
