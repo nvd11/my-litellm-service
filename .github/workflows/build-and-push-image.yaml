@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - ".gitignore"
+      - ".vscode/**"
     tags:
       - "v*"
   workflow_dispatch:
