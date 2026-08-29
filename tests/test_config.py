@@ -1,3 +1,4 @@
+import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings, redacted_summary
@@ -27,6 +28,7 @@ def test_settings_load_from_environment(monkeypatch):
     assert settings.mysql_host == "mysql.example.internal"
     assert settings.mysql_port == 3306
     assert settings.litellm_port == 4000
+    assert settings.default_usd_to_cny_rate == 7.23
     assert redacted_summary(settings)["secrets"] == "***"
 
 
@@ -36,12 +38,18 @@ def test_settings_rejects_invalid_port(monkeypatch):
     for key, value in values.items():
         monkeypatch.setenv(key, value)
 
-    try:
+    with pytest.raises(ValidationError):
         Settings()
-    except ValidationError:
-        pass
-    else:
-        raise AssertionError("invalid port should be rejected")
+
+
+def test_settings_rejects_invalid_fx_rate(monkeypatch):
+    values = _env()
+    values["DEFAULT_USD_TO_CNY_RATE"] = "-1.0"
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_redacted_summary_does_not_expose_secrets(monkeypatch):

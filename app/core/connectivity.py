@@ -1,5 +1,6 @@
 """Read-only health checks for external infrastructure dependencies."""
 
+import inspect
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -17,6 +18,10 @@ class CheckResult:
     ok: bool
     latency_ms: float | None
     detail: str
+
+
+def _elapsed_ms(started: float) -> float:
+    return (perf_counter() - started) * 1000.0
 
 
 def _error_detail(error: BaseException) -> str:
@@ -57,7 +62,9 @@ async def check_mysql(settings: Settings) -> CheckResult:
         return CheckResult("mysql", False, _elapsed_ms(started), _error_detail(error))
     finally:
         if cursor is not None:
-            cursor.close()
+            close_result = cursor.close()
+            if inspect.isawaitable(close_result):
+                await close_result
         if connection is not None:
             connection.close()
 
@@ -84,18 +91,17 @@ async def check_redis(settings: Settings) -> CheckResult:
         await client.aclose()
 
 
-def _elapsed_ms(started: float) -> float:
-    return round((perf_counter() - started) * 1000, 2)
-
-
 async def check_all(settings: Settings) -> list[CheckResult]:
-    """Check MySQL and Redis concurrently in a stable order."""
+    """Run dependency checks concurrently and return them in a deterministic order."""
 
-    import asyncio
-
-    mysql_result, redis_result = await asyncio.gather(
+    mysql_result, redis_result = await aiomysql_gather_checks(
         check_mysql(settings),
         check_redis(settings),
     )
     return [mysql_result, redis_result]
 
+
+async def aiomysql_gather_checks(*tasks):
+    import asyncio
+
+    return await asyncio.gather(*tasks)

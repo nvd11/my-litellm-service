@@ -26,10 +26,13 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_password: SecretStr
 
+    default_usd_to_cny_rate: float = 7.23
+
     openai_api_key_free_1: SecretStr
     openai_api_key_free_2: SecretStr | None = None
     openai_api_key_free_3: SecretStr | None = None
     openai_api_key_pro_plan: SecretStr | None = None
+    a6_api_key: SecretStr | None = None
 
     litellm_master_key: SecretStr
     litellm_port: int = 4000
@@ -60,6 +63,13 @@ class Settings(BaseSettings):
             raise ValueError("value must not be empty")
         return value
 
+    @field_validator("default_usd_to_cny_rate")
+    @classmethod
+    def validate_fx_rate(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("default_usd_to_cny_rate must be positive")
+        return value
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -77,6 +87,7 @@ def redacted_summary(settings: Settings) -> dict[str, object]:
         "mysql_db": settings.mysql_db,
         "redis_host": settings.redis_host,
         "redis_port": settings.redis_port,
+        "default_usd_to_cny_rate": settings.default_usd_to_cny_rate,
         "litellm_port": settings.litellm_port,
         "fastapi_port": settings.fastapi_port,
         "secrets": "***",
