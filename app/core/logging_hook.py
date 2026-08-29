@@ -46,9 +46,9 @@ def _calculate_latency_ms(
     if isinstance(start_time, datetime.datetime) and isinstance(end_time, datetime.datetime):
         return int((end_time - start_time).total_seconds() * 1000)
     if isinstance(start_time, (int, float)) and isinstance(end_time, (int, float)):
-        return int((end_time - start_time) * 1000)
+        return int(round((end_time - start_time) * 1000))
     if "response_time_ms" in kwargs:
-        return int(kwargs["response_time_ms"])
+        return int(round(float(kwargs["response_time_ms"])))
     return 0
 
 

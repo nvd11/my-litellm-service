@@ -44,6 +44,12 @@ router_settings:
     - gemini-3.7-flash: ["gemini-3.7-backup"]
 
 litellm_settings:
+  # 🎯 异步审计日志与汇率落库回调 (Phase 2 Custom Logger)
+  callbacks: ["app.core.logging_hook.custom_logger"]
+
+  # 🎯 确保流式 (stream=True) 请求在结束时计算并返回 Token 与 Cost
+  stream_usage: true
+
   cache: true
   cache_params:
     type: redis
@@ -52,3 +58,7 @@ litellm_settings:
     password: os.environ/REDIS_PASSWORD
     supported_call_types: [chat_completion]
     ttl: 3600
+
+general_settings:
+  # 🎯 确保 Proxy 网关层对所有流式请求开启 Token 计数
+  stream_usage: true
