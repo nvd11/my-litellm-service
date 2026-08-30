@@ -128,18 +128,18 @@
 ### 🔹 阶段一：PostgreSQL 接入与 OCI Vault 密钥托管
 
 - [x] **第 1 步**：在 **Neon (Singapore Region)** 开通实例，获取 Direct 直连串，本地与 ARM VM 双向实测（延迟 `10.95ms`）通过。[已完成 ✅]
-- [ ] **第 2 步**：在 OCI Vault (`gateman-vault` / `litellm-prod` compartment) 中创建 Secret：`litellm-database-url`，存储 Direct 模式 PG 连接串（带 `?sslmode=require`）。[待执行 ⏳]
-- [ ] **第 3 步**：更新本地 `.env.example` 与 `.env`，补充 `DATABASE_URL` 配置项。[已完成 ✅]
+- [x] **第 2 步**：在 OCI Vault (`gateman-vault` / `litellm-prod` compartment) 中创建 Secret：`litellm-database-url`，存储 Direct 模式 PG 连接串（带 `?sslmode=require`）。[已完成 ✅]
+- [x] **第 3 步**：更新本地 `.env.example` 与 `.env`，补充 `DATABASE_URL` 配置项。[已完成 ✅]
 
 ---
 
 ### 🔹 阶段二：镜像依赖完备性校验与多架构 CI/CD 发布
 
-- [ ] **第 4 步**：优化 `Dockerfile`：
+- [x] **第 4 步**：优化 `Dockerfile`：
   - 确保安装 `openssl ca-certificates`；
   - 注入 `PRISMA_CACHE_DIR="/tmp/prisma-cache"` 解决非 root `65532` 用户写权限问题。
-- [ ] **第 5 步**：本地运行全量 pytest (25 passed) 与 ruff check 确保代码无回归。
-- [ ] **第 6 步**：提交并推送代码至 GitHub，触发 GitHub Actions 构建 `linux/amd64,linux/arm64` 双架构镜像，并获取最新镜像 Digest。
+- [x] **第 5 步**：本地运行全量 pytest (25 passed) 与 ruff check 确保代码无回归。[已完成 ✅]
+- [x] **第 6 步**：提交并推送代码至 GitHub，触发 GitHub Actions 构建 `linux/amd64,linux/arm64` 双架构镜像，并获取最新镜像 Digest。[已完成 ✅]
 
 ---
 
