@@ -145,10 +145,10 @@
 
 ### 🔹 阶段三：GitOps / ArgoCD 图纸编排与 K3s 同步
 
-- [ ] **第 7 步**：更新 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`：
+- [x] **第 7 步**：更新 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml`：
   - 更新 `image.digest` 为第 6 步生成的最强多架构镜像摘要；
   - 在 `externalSecret.data` 中增加 `DATABASE_URL` 映射（指向 Vault 的 `litellm-database-url`）；
-  - 确认 Kong Gateway API `extraRoutes.ui-route` 涵盖全部登录、认证与静态资源路径。
+  - 确认 Kong Gateway API `extraRoutes.ui-route` 涵盖全部登录、认证与静态资源路径。[已完成 ✅]
 - [ ] **第 8 步**：提交并推送 `my-argocd-manifests`，触发 ArgoCD 自动同步与 Pod 滚动更新。
 - [ ] **第 9 步**：监控 Pod 日志，确认首次启动自动完成 Prisma DDL 建表，双 DB（Neon PG 连接就绪 + OCI MySQL 探活正常）输出。
 
