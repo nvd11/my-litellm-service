@@ -4,7 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH="/app" \
     PATH="/app/.venv/bin:$PATH" \
-    PRISMA_CACHE_DIR="/tmp/prisma-cache"
+    PRISMA_HOME_DIR="/tmp/prisma-cache" \
+    PRISMA_USE_GLOBAL_NODE="true"
 
 WORKDIR /app
 
@@ -12,6 +13,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     openssl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md ./
@@ -19,8 +22,8 @@ COPY pyproject.toml uv.lock README.md ./
 # 安装依赖并提前预生成 Prisma 客户端代码
 RUN pip install --no-cache-dir uv \
     && uv sync --frozen --no-dev --no-install-project \
-    && uv run prisma generate --schema=/app/.venv/lib/python3.12/site-packages/litellm/proxy/schema.prisma \
     && mkdir -p /tmp/prisma-cache \
+    && PRISMA_HOME_DIR=/tmp/prisma-cache uv run prisma generate --schema=/app/.venv/lib/python3.12/site-packages/litellm/proxy/schema.prisma \
     && chmod -R 777 /tmp/prisma-cache \
     && rm -rf /root/.cache
 
