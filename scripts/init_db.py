@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
     api_key_alias VARCHAR(64) DEFAULT 'default',
     model_requested VARCHAR(64) NOT NULL,
     model_used VARCHAR(64) NOT NULL,
+    provider VARCHAR(64) NOT NULL DEFAULT 'unknown',
+    provider_key_alias VARCHAR(64) NOT NULL DEFAULT 'unknown',
     prompt_tokens INT NOT NULL DEFAULT 0,
     completion_tokens INT NOT NULL DEFAULT 0,
     total_tokens INT NOT NULL DEFAULT 0,
@@ -31,6 +33,8 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_logs_created_at (created_at),
     INDEX idx_logs_model_used (model_used),
+    INDEX idx_logs_provider (provider),
+    INDEX idx_logs_provider_key (provider_key_alias),
     INDEX idx_logs_status_code (status_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """

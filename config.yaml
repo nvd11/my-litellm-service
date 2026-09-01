@@ -15,6 +15,9 @@ model_list:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_3
       rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_3"
 
   # === 🛡️ 应急保底组 (独立模型标识，避免污染主池 Responses API) ===
   # Gemini 3.7 Flash - A6 API Relay
@@ -24,6 +27,9 @@ model_list:
       api_base: https://api.a6api.com/v1
       api_key: os.environ/A6_API_KEY
       rpm: 60
+      metadata:
+        provider: "a6api.com"
+        provider_key_alias: "A6_API_KEY"
 
 router_settings:
   routing_strategy: "least-busy" # 负载均衡：优先选择当前空闲/负载最小的 Key 派发请求

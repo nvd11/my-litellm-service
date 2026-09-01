@@ -60,6 +60,21 @@ llm_request_logs = Table(
         nullable=False,
         comment="实际命中的上游模型 ID (追踪降级轨迹)",
     ),
+    # 上游供应商与上游 API Key 标识
+    Column(
+        "provider",
+        String(64),
+        nullable=False,
+        server_default="unknown",
+        comment="上游真实供应商标识 (如 google-gemini, a6api.com)",
+    ),
+    Column(
+        "provider_key_alias",
+        String(64),
+        nullable=False,
+        server_default="unknown",
+        comment="调用上游使用的 API Key 别名",
+    ),
     # Token 计量字段 (提示、补全与总 Token 数)
     Column(
         "prompt_tokens",
@@ -130,6 +145,8 @@ llm_request_logs = Table(
     # 索引优化
     Index("idx_logs_created_at", "created_at"),
     Index("idx_logs_model_used", "model_used"),
+    Index("idx_logs_provider", "provider"),
+    Index("idx_logs_provider_key", "provider_key_alias"),
     Index("idx_logs_status_code", "status_code"),
     mysql_engine="InnoDB",
     mysql_charset="utf8mb4",

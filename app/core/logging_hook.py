@@ -171,6 +171,134 @@ def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str
     return str(model_requested)[:64], str(model_used)[:64]
 
 
+def _extract_provider_info(
+    kwargs: dict[str, Any],
+    response_obj: Any,
+) -> tuple[str, str]:
+    """提取上游大模型供应商 (provider) 与所使用的 API Key 别名 (provider_key_alias).
+
+    深度支持 LiteLLM 回调的多层优先级与特征推导:
+    1. litellm_params.metadata / litellm_params (显式配置)
+    2. standard_logging_object.metadata (LiteLLM 官方标准对象)
+    3. 顶层 metadata / litellm_metadata
+    4. 智能特征推导兜底 (根据 api_base / model_used / custom_llm_provider 等)
+    5. 兜底返回 ('unknown', 'unknown').
+    """
+    provider_candidates: list[Any] = []
+    key_alias_candidates: list[Any] = []
+
+    # 1. litellm_params 及其 metadata
+    litellm_params = kwargs.get("litellm_params")
+    if isinstance(litellm_params, dict):
+        lp_meta = litellm_params.get("metadata")
+        if isinstance(lp_meta, dict):
+            provider_candidates.extend([
+                lp_meta.get("provider"),
+                lp_meta.get("upstream_provider"),
+            ])
+            key_alias_candidates.extend([
+                lp_meta.get("provider_key_alias"),
+                lp_meta.get("upstream_key_alias"),
+            ])
+        provider_candidates.extend([
+            litellm_params.get("provider"),
+            litellm_params.get("custom_llm_provider"),
+        ])
+
+    # 2. standard_logging_object
+    std_obj = kwargs.get("standard_logging_object")
+    if isinstance(std_obj, dict):
+        std_meta = std_obj.get("metadata")
+        if isinstance(std_meta, dict):
+            provider_candidates.extend([
+                std_meta.get("provider"),
+                std_meta.get("upstream_provider"),
+            ])
+            key_alias_candidates.extend([
+                std_meta.get("provider_key_alias"),
+                std_meta.get("upstream_key_alias"),
+            ])
+        provider_candidates.append(std_obj.get("custom_llm_provider"))
+
+    # 3. 顶层 metadata 与 litellm_metadata
+    for meta_key in ("metadata", "litellm_metadata", "user_api_key_metadata"):
+        meta_dict = kwargs.get(meta_key)
+        if isinstance(meta_dict, dict):
+            provider_candidates.extend([
+                meta_dict.get("provider"),
+                meta_dict.get("upstream_provider"),
+            ])
+            key_alias_candidates.extend([
+                meta_dict.get("provider_key_alias"),
+                meta_dict.get("upstream_key_alias"),
+            ])
+
+    # 4. 顶层直接字段
+    provider_candidates.extend([
+        kwargs.get("provider"),
+        kwargs.get("custom_llm_provider"),
+    ])
+    key_alias_candidates.extend([
+        kwargs.get("provider_key_alias"),
+        kwargs.get("upstream_key_alias"),
+    ])
+
+    # 提取第一有效 provider
+    provider = "unknown"
+    for p in provider_candidates:
+        if p is not None:
+            s = str(p).strip()
+            if s and s.lower() != "none" and s.lower() != "unknown":
+                provider = s[:64]
+                break
+
+    # 提取第一有效 provider_key_alias
+    provider_key_alias = "unknown"
+    for k in key_alias_candidates:
+        if k is not None:
+            s = str(k).strip()
+            if s and s.lower() != "none" and s.lower() != "unknown":
+                provider_key_alias = s[:64]
+                break
+
+    # 5. 智能特征推导兜底 (若仍为 unknown)
+    api_base = ""
+    if isinstance(litellm_params, dict):
+        api_base = str(litellm_params.get("api_base") or "")
+    if not api_base and "api_base" in kwargs:
+        api_base = str(kwargs.get("api_base") or "")
+
+    model_used = ""
+    if hasattr(response_obj, "model") and response_obj.model:
+        model_used = str(response_obj.model)
+    elif isinstance(response_obj, dict) and response_obj.get("model"):
+        model_used = str(response_obj["model"])
+    elif isinstance(litellm_params, dict) and litellm_params.get("model"):
+        model_used = str(litellm_params.get("model"))
+    elif "model" in kwargs:
+        model_used = str(kwargs.get("model") or "")
+
+    if provider == "unknown":
+        if "a6api.com" in api_base or "a6" in model_used.lower() or "backup" in model_used.lower():
+            provider = "a6api.com"
+        elif "meta-api.vip" in api_base:
+            provider = "meta-api.vip"
+        elif "deepseek" in model_used.lower():
+            provider = "deepseek"
+        elif "gemini" in model_used.lower():
+            provider = "google-gemini"
+        elif "openai" in model_used.lower():
+            provider = "openai"
+
+    if provider_key_alias == "unknown":
+        if provider == "a6api.com" or "a6api.com" in api_base:
+            provider_key_alias = "A6_API_KEY"
+        elif provider == "google-gemini":
+            provider_key_alias = "OPENAI_API_KEY_FREE_3"
+
+    return provider[:64], provider_key_alias[:64]
+
+
 def _extract_tokens(response_obj: Any) -> tuple[int, int, int]:
     """从响应对象中安全提取 Prompt, Completion, Total Token 数量."""
     usage = getattr(response_obj, "usage", None)
@@ -251,6 +379,8 @@ class DBLoggingLogger(CustomLogger):
             request_id = _extract_request_id(kwargs, response_obj)
             api_key_alias = _extract_api_key_alias(kwargs)
             model_requested, model_used = _extract_model_names(kwargs, response_obj)
+            provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
+            provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
             prompt_tokens, completion_tokens, total_tokens = _extract_tokens(response_obj)
 
             # 提取美金成本 (LiteLLM 会在 kwargs 或 response 中注入 response_cost)
@@ -275,6 +405,8 @@ class DBLoggingLogger(CustomLogger):
                 api_key_alias=api_key_alias,
                 model_requested=model_requested,
                 model_used=model_used,
+                provider=provider,
+                provider_key_alias=provider_key_alias,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
@@ -321,6 +453,7 @@ class DBLoggingLogger(CustomLogger):
             request_id = _extract_request_id(kwargs, response_obj)
             api_key_alias = _extract_api_key_alias(kwargs)
             model_requested, model_used = _extract_model_names(kwargs, response_obj)
+            provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
 
             # 失败请求 Token 与费用归零
             prompt_tokens, completion_tokens, total_tokens = 0, 0, 0
@@ -336,6 +469,8 @@ class DBLoggingLogger(CustomLogger):
                 api_key_alias=api_key_alias,
                 model_requested=model_requested,
                 model_used=model_used,
+                provider=provider,
+                provider_key_alias=provider_key_alias,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,

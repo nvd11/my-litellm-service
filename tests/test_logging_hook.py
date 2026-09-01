@@ -32,6 +32,7 @@ from app.core.logging_hook import (
     _extract_api_key_alias,
     _extract_error_status_code,
     _extract_model_names,
+    _extract_provider_info,
     _extract_request_id,
     _extract_tokens,
 )
@@ -197,6 +198,68 @@ def test_extract_api_key_alias():
     assert len(_extract_api_key_alias({"user_api_key_alias": long_alias})) == 64
 
 
+def test_extract_provider_info():
+    """验证上游大模型供应商与 Key 别名的多层提取与智能特征推导."""
+    # 1. 显式 litellm_params.metadata 配置
+    kwargs_1 = {
+        "litellm_params": {
+            "metadata": {
+                "provider": "google-gemini",
+                "provider_key_alias": "OPENAI_API_KEY_FREE_3",
+            }
+        }
+    }
+    p1, k1 = _extract_provider_info(kwargs_1, None)
+    assert p1 == "google-gemini"
+    assert k1 == "OPENAI_API_KEY_FREE_3"
+
+    # 2. standard_logging_object.metadata 提取
+    kwargs_2 = {
+        "standard_logging_object": {
+            "metadata": {
+                "upstream_provider": "a6api.com",
+                "upstream_key_alias": "A6_API_KEY",
+            }
+        }
+    }
+    p2, k2 = _extract_provider_info(kwargs_2, None)
+    assert p2 == "a6api.com"
+    assert k2 == "A6_API_KEY"
+
+    # 3. 顶层 metadata 提取
+    kwargs_3 = {
+        "metadata": {
+            "provider": "meta-api.vip",
+            "provider_key_alias": "META_API_KEY",
+        }
+    }
+    p3, k3 = _extract_provider_info(kwargs_3, None)
+    assert p3 == "meta-api.vip"
+    assert k3 == "META_API_KEY"
+
+    # 4. 智能特征推导 (a6api.com api_base)
+    kwargs_4 = {
+        "litellm_params": {
+            "api_base": "https://api.a6api.com/v1",
+            "model": "openai/gemini-3.7-flash",
+        }
+    }
+    p4, k4 = _extract_provider_info(kwargs_4, None)
+    assert p4 == "a6api.com"
+    assert k4 == "A6_API_KEY"
+
+    # 5. 智能特征推导 (gemini model)
+    kwargs_5 = {"model": "gemini/gemini-3.7-flash"}
+    p5, k5 = _extract_provider_info(kwargs_5, None)
+    assert p5 == "google-gemini"
+    assert k5 == "OPENAI_API_KEY_FREE_3"
+
+    # 6. 未知模型兜底
+    p6, k6 = _extract_provider_info({}, None)
+    assert p6 == "unknown"
+    assert k6 == "unknown"
+
+
 def test_extract_model_names():
     """验证模型别名与实际执行模型的提取 (降级轨迹追踪)."""
     # 1. 常规同名模型
@@ -315,6 +378,8 @@ async def test_async_log_success_event_standard(monkeypatch):
     assert params["api_key_alias"] == "hsbc-rcdp-team"
     assert params["model_requested"] == "gemini-3.7-flash"
     assert params["model_used"] == "gemini/gemini-3.7-flash"
+    assert params["provider"] == "google-gemini"
+    assert params["provider_key_alias"] == "OPENAI_API_KEY_FREE_3"
     assert params["prompt_tokens"] == 100
     assert params["completion_tokens"] == 50
     assert params["total_tokens"] == 150
@@ -344,6 +409,13 @@ async def test_async_log_success_event_fallback_trajectory(monkeypatch):
     kwargs = {
         "model": "gemini-3.7-flash",
         "response_cost": 0.000100,
+        "litellm_params": {
+            "api_base": "https://api.a6api.com/v1",
+            "metadata": {
+                "provider": "a6api.com",
+                "provider_key_alias": "A6_API_KEY",
+            },
+        },
     }
     response_obj = {
         "id": "chatcmpl-backup-888",
@@ -363,6 +435,8 @@ async def test_async_log_success_event_fallback_trajectory(monkeypatch):
 
     assert params["model_requested"] == "gemini-3.7-flash"
     assert params["model_used"] == "openai/gemini-3.7-backup"
+    assert params["provider"] == "a6api.com"
+    assert params["provider_key_alias"] == "A6_API_KEY"
     assert params["prompt_tokens"] == 40
     assert params["completion_tokens"] == 60
     assert params["total_tokens"] == 100
@@ -405,6 +479,8 @@ async def test_async_log_failure_event_rate_limit(monkeypatch):
 
     assert params["request_id"] == "call-fail-429"
     assert params["status_code"] == 429
+    assert params["provider"] == "google-gemini"
+    assert params["provider_key_alias"] == "OPENAI_API_KEY_FREE_3"
     assert params["prompt_tokens"] == 0
     assert params["completion_tokens"] == 0
     assert params["total_tokens"] == 0
