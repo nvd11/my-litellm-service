@@ -66,14 +66,86 @@ def _extract_request_id(kwargs: dict[str, Any], response_obj: Any) -> str:
 
 
 def _extract_api_key_alias(kwargs: dict[str, Any]) -> str:
-    """提取客户端调用方 Key 别名或团队身份."""
-    alias = (
-        kwargs.get("user_api_key_alias")
-        or kwargs.get("litellm_metadata", {}).get("user_api_key_alias")
-        or kwargs.get("metadata", {}).get("user_api_key_alias")
-        or "default"
-    )
-    return str(alias)[:64]
+    """提取客户端调用方 Key 别名或团队身份.
+
+    深度支持 LiteLLM 官方回调的多层嵌套结构:
+    1. standard_logging_object.metadata (LiteLLM 官方标准日志对象)
+    2. litellm_params.metadata / litellm_params
+    3. 顶层 metadata / litellm_metadata / user_api_key_dict / user_api_key_metadata
+    4. 顶层字段 (user_api_key_alias / key_alias / api_key_alias / user_api_key_user_id)
+    5. 兜底返回 'default'.
+    """
+    candidates: list[Any] = []
+
+    # 1. LiteLLM standard_logging_object (标准日志对象)
+    std_obj = kwargs.get("standard_logging_object")
+    if isinstance(std_obj, dict):
+        std_meta = std_obj.get("metadata")
+        if isinstance(std_meta, dict):
+            candidates.extend([
+                std_meta.get("user_api_key_alias"),
+                std_meta.get("key_alias"),
+                std_meta.get("user_api_key_user_id"),
+            ])
+        candidates.extend([
+            std_obj.get("user_api_key_alias"),
+            std_obj.get("key_alias"),
+        ])
+
+    # 2. litellm_params (路由与请求参数)
+    litellm_params = kwargs.get("litellm_params")
+    if isinstance(litellm_params, dict):
+        lp_meta = litellm_params.get("metadata")
+        if isinstance(lp_meta, dict):
+            candidates.extend([
+                lp_meta.get("user_api_key_alias"),
+                lp_meta.get("key_alias"),
+                lp_meta.get("user_api_key_user_id"),
+            ])
+        candidates.extend([
+            litellm_params.get("user_api_key_alias"),
+            litellm_params.get("key_alias"),
+            litellm_params.get("api_key_alias"),
+        ])
+
+    # 3. 顶层 metadata 与各类元数据字典
+    for meta_key in ("metadata", "litellm_metadata", "user_api_key_metadata"):
+        meta_dict = kwargs.get(meta_key)
+        if isinstance(meta_dict, dict):
+            candidates.extend([
+                meta_dict.get("user_api_key_alias"),
+                meta_dict.get("key_alias"),
+                meta_dict.get("user_api_key_user_id"),
+            ])
+
+    # 4. user_api_key_dict 对象或字典
+    key_dict = kwargs.get("user_api_key_dict")
+    if isinstance(key_dict, dict):
+        candidates.extend([
+            key_dict.get("key_alias"),
+            key_dict.get("user_id"),
+        ])
+    elif key_dict is not None:
+        candidates.extend([
+            getattr(key_dict, "key_alias", None),
+            getattr(key_dict, "user_id", None),
+        ])
+
+    # 5. 顶层直取
+    candidates.extend([
+        kwargs.get("user_api_key_alias"),
+        kwargs.get("key_alias"),
+        kwargs.get("api_key_alias"),
+        kwargs.get("user_api_key_user_id"),
+    ])
+
+    for item in candidates:
+        if item is not None:
+            s = str(item).strip()
+            if s and s.lower() != "none":
+                return s[:64]
+
+    return "default"
 
 
 def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str, str]:

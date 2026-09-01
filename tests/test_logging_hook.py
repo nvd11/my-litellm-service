@@ -132,26 +132,67 @@ def test_extract_request_id():
 
 
 def test_extract_api_key_alias():
-    """验证从多种嵌套元数据中提取调用方身份及截断."""
+    """验证从多种深度嵌套元数据中提取调用方身份及截断."""
     # 1. 直接字段
     assert _extract_api_key_alias({"user_api_key_alias": "team-risk"}) == "team-risk"
+    assert _extract_api_key_alias({"key_alias": "claire"}) == "claire"
 
-    # 2. litellm_metadata 嵌套
+    # 2. standard_logging_object (LiteLLM 官方标准日志结构)
+    assert (
+        _extract_api_key_alias({
+            "standard_logging_object": {
+                "metadata": {"user_api_key_alias": "claire-nixos"}
+            }
+        })
+        == "claire-nixos"
+    )
+    assert (
+        _extract_api_key_alias({
+            "standard_logging_object": {
+                "metadata": {"key_alias": "yui-radxa"}
+            }
+        })
+        == "yui-radxa"
+    )
+
+    # 3. litellm_params 嵌套
+    assert (
+        _extract_api_key_alias({
+            "litellm_params": {
+                "metadata": {"user_api_key_alias": "hebe-arm"}
+            }
+        })
+        == "hebe-arm"
+    )
+    assert (
+        _extract_api_key_alias({
+            "litellm_params": {"key_alias": "celia-pc"}
+        })
+        == "celia-pc"
+    )
+
+    # 4. user_api_key_dict 结构
+    assert _extract_api_key_alias({"user_api_key_dict": {"key_alias": "moon"}}) == "moon"
+    obj_with_alias = SimpleNamespace(key_alias="alice")
+    assert _extract_api_key_alias({"user_api_key_dict": obj_with_alias}) == "alice"
+
+    # 5. litellm_metadata & metadata 嵌套
     assert (
         _extract_api_key_alias({"litellm_metadata": {"user_api_key_alias": "team-audit"}})
         == "team-audit"
     )
-
-    # 3. metadata 嵌套
     assert (
         _extract_api_key_alias({"metadata": {"user_api_key_alias": "team-compass"}})
         == "team-compass"
     )
 
-    # 4. 兜底返回 default
+    # 6. 兜底返回 default
     assert _extract_api_key_alias({}) == "default"
+    assert _extract_api_key_alias({"user_api_key_alias": None}) == "default"
+    assert _extract_api_key_alias({"user_api_key_alias": "   "}) == "default"
+    assert _extract_api_key_alias({"user_api_key_alias": "None"}) == "default"
 
-    # 5. 超长截断至 64 位
+    # 7. 超长截断至 64 位
     long_alias = "a" * 100
     assert len(_extract_api_key_alias({"user_api_key_alias": long_alias})) == 64
 
