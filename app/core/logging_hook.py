@@ -278,20 +278,29 @@ def _extract_provider_info(
     elif "model" in kwargs:
         model_used = str(kwargs.get("model") or "")
 
-    if provider == "unknown":
-        if "a6api.com" in api_base or "a6" in model_used.lower() or "backup" in model_used.lower():
-            provider = "a6api.com"
-        elif "meta-api.vip" in api_base:
-            provider = "meta-api.vip"
-        elif "deepseek" in model_used.lower():
-            provider = "deepseek"
-        elif "gemini" in model_used.lower():
-            provider = "google-gemini"
-        elif "openai" in model_used.lower():
-            provider = "openai"
+    # 5. 规范化与智能特征推导
+    if "a6api.com" in api_base or "backup" in model_used.lower() or "a6" in model_used.lower():
+        provider = "a6api.com"
+        provider_key_alias = "A6_API_KEY"
+    elif "gemini" in model_used.lower() or provider in ("gemini", "google"):
+        provider = "google-gemini"
+        if provider_key_alias == "unknown":
+            provider_key_alias = "OPENAI_API_KEY_FREE_3"
+    elif "meta-api.vip" in api_base:
+        provider = "meta-api.vip"
+        if provider_key_alias == "unknown":
+            provider_key_alias = "META_API_KEY"
+    elif "deepseek" in model_used.lower():
+        provider = "deepseek"
+        if provider_key_alias == "unknown":
+            provider_key_alias = "DEEPSEEK_API_KEY"
+    elif provider == "gemini":
+        provider = "google-gemini"
+        if provider_key_alias == "unknown":
+            provider_key_alias = "OPENAI_API_KEY_FREE_3"
 
     if provider_key_alias == "unknown":
-        if provider == "a6api.com" or "a6api.com" in api_base:
+        if provider == "a6api.com":
             provider_key_alias = "A6_API_KEY"
         elif provider == "google-gemini":
             provider_key_alias = "OPENAI_API_KEY_FREE_3"
