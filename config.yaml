@@ -9,31 +9,39 @@
 
 model_list:
   # === 🟢 主力日常活跃组 (Google 原生 Key 3，完美支持 Responses API 与工具调用) ===
-  # Gemini 3.7 Flash - Key 3 (Old GCP Project - 100% 健康)
+  # Gemini 3.7 Flash - Key 3 (Google 官方原价: $0.75/1M Input, $3.75/1M Output)
   - model_name: gemini-3.7-flash
     litellm_params:
       model: gemini/gemini-3.7-flash
       api_key: os.environ/OPENAI_API_KEY_FREE_3
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
       rpm: 15
       metadata:
         provider: "google-gemini"
         provider_key_alias: "OPENAI_API_KEY_FREE_3"
     model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
       provider: "google-gemini"
       provider_key_alias: "OPENAI_API_KEY_FREE_3"
 
-  # === 🛡️ 应急保底组 (独立模型标识，避免污染主池 Responses API) ===
+  # === 🛡️ 应急保底组 (A6 API 中转站 - 官方 5 折实收: $0.375/1M Input, $1.875/1M Output) ===
   # Gemini 3.7 Flash - A6 API Relay
   - model_name: gemini-3.7-backup
     litellm_params:
       model: openai/gemini-3.7-flash
       api_base: https://api.a6api.com/v1
       api_key: os.environ/A6_API_KEY
+      input_cost_per_token: 0.000000375
+      output_cost_per_token: 0.000001875
       rpm: 60
       metadata:
         provider: "a6api.com"
         provider_key_alias: "A6_API_KEY"
     model_info:
+      input_cost_per_token: 0.000000375
+      output_cost_per_token: 0.000001875
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
