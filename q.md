@@ -1,66 +1,60 @@
-很好, 为4个人模块都分别编写一份md for Implementation Plan
+Great, write an implementation plan markdown file for each of the 4 individual modules.
 
-文档里的降级是什么意思?
+What does fallback / degradation mean in the document?
 
 docs/ARCHITECTURE.md
 
-那么我们要为两个fastapi svc 分别在这个repo里见两个folder 吗? 而且分别要创建venv?
+So do we need to create two separate folders in this repo for the two FastAPI services, and create separate venvs for each?
 
-你的建议是怎样的? 还是分开两个repo?
+What is your recommendation? Or should we keep them in separate repos?
 
+So we only need a single GCE VM?
 
+Stop,
 
-所以我们只需要一台gce vm?
+Because my GCP learning resources can be reclaimed at any time.
 
-停,
+I do not want to store data on GCP.
 
-因为我的gcp 学习资源随时会被回收
+Regarding PostgreSQL, I'd like to replace it with OCI Free Tier MySQL. Do you think that's feasible?
 
-我不想把数据放在gcp
-
-
-
-对于pgsql, 我想用oci 白嫖mysql代替, 你觉得可行吗?
-
-
-no 我那个白嫖mysql不是部署在oci vm上的, 而是oci的mysql产品, 你先用oci的skill帮我检验下
-
+No, my free tier MySQL is not deployed on an OCI VM, but is OCI's managed MySQL Database Service product. Please check it for me first using OCI skills/tools.
 
 ===========
-  1 个 Container Package / Image 项目
+  1 Container Package / Image Project
 
-  项目名：
+  Project Name:
 
   ghcr.io/nvd11/my-litellm-svc
 
-  这次构建生成一个多架构镜像 manifest：
+  This build produces a multi-arch image manifest:
 
-  amd64 镜像
-  arm64 镜像
+  amd64 image
+  arm64 image
 
- 并给同一个构建结果挂两个 tag：
+  And attaches two tags to the same build result:
 
   sha-00d8238...
   latest
 
-  这两个tag 分别是fo哪个manifest
+  Which manifest do these two tags point to respectively?
 
-  =================
+=================
 
-  好, 调整一下 我的config.yaml
+Great, adjust my config.yaml:
 
-  1. 删除gemini-3.6-flash的配置
-  我们只用3.7 flash
+1. Remove the gemini-3.6-flash configuration.
+We only use 3.7 flash.
 
-  2. 优先使用 free1和free2 的api key正常轮换
+2. Prioritize rotating between free1 and free2 API keys normally.
 
-  3. 如果free1 和free2 都429了(或者其他问题), 就用pro-plan的api-key
+3. If both free1 and free2 encounter 429 (or other issues), fall back to the pro-plan API key.
 
-  4. 如果pro-plan的key也429 就用free3的key包底
+4. If the pro-plan key also hits 429, fall back to free3 as the final safety net.
 
-  5.加上
-  - OPENAI_API_KEY_FREE_1：主力老号 1 (主人)
-- OPENAI_API_KEY_FREE_2：主力老号 2 (师母)
-- OPENAI_API_KEY_PRO_PLAN：主力 Google AI Pro 旗舰号
-- OPENAI_API_KEY_FREE_3：终极应急保底号
-这些key 描述作为开头的注解说明
+5. Add:
+- OPENAI_API_KEY_FREE_1: Primary Account 1 (Owner)
+- OPENAI_API_KEY_FREE_2: Primary Account 2 (Spouse)
+- OPENAI_API_KEY_PRO_PLAN: Primary Google AI Pro Account
+- OPENAI_API_KEY_FREE_3: Ultimate Emergency Fallback Account
+Include these key descriptions as opening comment documentation.

@@ -1,25 +1,25 @@
-# 模块三实施计划：本地客观评测引擎 (Eval Engine: Option A + Option B)
+# Module 3 Implementation Plan: Local Objective Evaluation Engine (Option A + Option B)
 
-> **目标**：在 FastAPI (Service B Deployment) 中构建低延迟、客观、零额外 API 成本的大模型评测引擎，支持方案 A (确定性断言) 与 方案 B (黄金数据集比对)。
-
----
-
-## 1. 架构与设计说明
-
-### 1.1 校验策略对比 (Option A vs Option B)
-* **Option A：确定性断言 (Deterministic Validation)**
-  * `json_schema`: 校验输出是否符合 Pydantic / JSON Schema 语法。
-  * `code_exec`: 在沙盒环境中执行 Python 代码并运行断言。
-  * `contains`: 正则或关键字包含断言。
-* **Option B：黄金数据集比对 (Golden Dataset Matching)**
-  * `exact_match`: 与标准答案（`golden_output`）进行完全文本匹配。
-  * `similarity`: 基于 `difflib` 或字符重合率计算相似度得分（0.00 ~ 1.00）。
+> **Goal**: Construct a low-latency, objective, zero-API-cost LLM evaluation engine within FastAPI (Service B Deployment), supporting Option A (Deterministic Validation) and Option B (Golden Dataset Matching).
 
 ---
 
-## 2. 详细实施步骤 (Step-by-Step)
+## 1. Architecture & Design Specification
 
-### Step 1: MySQL DDL 校验结果表 (`eval_benchmarks`)
+### 1.1 Validation Strategies (Option A vs. Option B)
+* **Option A: Deterministic Validation**
+  * `json_schema`: Validates output conformance against Pydantic / JSON Schema definitions.
+  * `code_exec`: Executes Python code against unit test assertions in a secured sandbox.
+  * `contains`: Regex pattern or keyword inclusion assertions.
+* **Option B: Golden Dataset Matching**
+  * `exact_match`: Performs strict string equality matching against `golden_output`.
+  * `similarity`: Computes similarity scores (0.00 ~ 1.00) based on `difflib` or character n-gram coverage.
+
+---
+
+## 2. Step-by-Step Implementation
+
+### Step 1: MySQL Schema for Evaluation Results (`eval_benchmarks`)
 ```sql
 CREATE TABLE IF NOT EXISTS eval_benchmarks (
     id VARCHAR(36) PRIMARY KEY,
@@ -36,14 +36,14 @@ CREATE TABLE IF NOT EXISTS eval_benchmarks (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-### Step 2: 评测核心函数编写 (`app/eval/evaluators.py`)
+### Step 2: Evaluation Logic Implementation (`app/eval/evaluators.py`)
 ```python
 import json
 import jsonschema
 import difflib
 
 def evaluate_option_a(response_text: str, eval_type: str, rule_config: dict) -> float:
-    """方案 A：确定性断言校验"""
+    """Option A: Deterministic assertion evaluation"""
     if eval_type == "json_schema":
         try:
             data = json.loads(response_text)
@@ -58,7 +58,7 @@ def evaluate_option_a(response_text: str, eval_type: str, rule_config: dict) -> 
     return 0.0
 
 def evaluate_option_b(response_text: str, eval_type: str, golden_output: str) -> float:
-    """方案 B：黄金数据集比对"""
+    """Option B: Golden dataset matching"""
     if eval_type == "exact_match":
         return 100.0 if response_text.strip() == golden_output.strip() else 0.0
     elif eval_type == "similarity":
@@ -67,8 +67,8 @@ def evaluate_option_b(response_text: str, eval_type: str, golden_output: str) ->
     return 0.0
 ```
 
-### Step 3: 并发评测 API 端点 (`POST /v1/eval/run`)
-借助 `httpx.AsyncClient` 并发向 LiteLLM Proxy 发起测试，捕获耗时并计算准确率得分：
+### Step 3: Concurrent Benchmark API Endpoint (`POST /v1/eval/run`)
+Leverages `httpx.AsyncClient` to dispatch concurrent queries to LiteLLM Proxy, recording latencies and accuracy scores:
 ```python
 # app/routers/eval.py
 from fastapi import APIRouter
@@ -84,7 +84,7 @@ async def run_evaluation(eval_payload: dict):
     
     results = []
     async with httpx.AsyncClient(base_url="http://litellm-proxy.llm-system.svc.cluster.local:4000") as client:
-        # 并发向多模型发送请求并评估...
+        # Dispatch concurrent evaluation requests across candidate models...
         pass
         
     return {"eval_run_id": eval_run_id, "results": results}
@@ -92,9 +92,9 @@ async def run_evaluation(eval_payload: dict):
 
 ---
 
-## 3. 验收与测试方案 (Verification & Acceptance)
+## 3. Verification & Acceptance Testing
 
-1. **测试 JSON Schema 评测断言**：
+1. **JSON Schema Assertion Verification**:
    ```bash
    curl -X POST http://<kong-host>/v1/eval/run \
      -H "Content-Type: application/json" \
@@ -108,12 +108,12 @@ async def run_evaluation(eval_payload: dict):
        "models": ["gpt-4o"]
      }'
    ```
-2. **测试 Golden Match 评测比对**：
-   * 传入标准 `golden_output` 文本，验证返回的 `accuracy_score` 是否与比对算法（`difflib` / 完全匹配）预期相符。
+2. **Golden Match Verification**:
+   * Supply expected `golden_output` strings and verify that returned `accuracy_score` metrics align with matching algorithms (`difflib` / strict match).
 
 ---
 
-## 4. 风险控制与红线 (Risk Control)
+## 4. Risk Control & Operational Constraints
 
-* ⚠️ **沙盒隔离**：若启用 `code_exec` 执行生成代码，必须限定在隔离环境或受限 `exec()` 环境下运行，防止高危系统命令越权。
-* ⚠️ **并发限流**：评测并发数需受限（如 `asyncio.Semaphore(10)`），避免突发大量请求直接打满后端 LLM 限流额度。
+* ⚠️ **Sandbox Isolation**: If enabling `code_exec` to run model-generated code, execute within restricted environments to prevent unauthorized system command execution.
+* ⚠️ **Concurrency Throttling**: Cap benchmark concurrency (e.g., `asyncio.Semaphore(10)`) to avoid overwhelming upstream provider rate limits.

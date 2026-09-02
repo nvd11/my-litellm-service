@@ -1,20 +1,20 @@
 # my-litellm-service
 
-> Enterprise Multi-LLM Gateway, Cost Tracking & Evaluation Middleware on GCP.
+> Enterprise Multi-LLM Gateway, Cost Tracking & Evaluation Middleware on GCP / OCI / Hybrid Cloud.
 
-`my-litellm-service` 是一个基于 **K3s + ArgoCD + 现有 Kong Gateway + OCI MySQL HeatWave** 的企业级大模型统一网关与评测中间件服务。项目采用 **LiteLLM Proxy + FastAPI + OCI MySQL + 现有 K3s Redis** 跨云解耦架构，提供多模型路由容灾、精细化 Token/美金费用审计、Redis 缓存加速以及大模型 Benchmark 自动化评测支持。数据持久化存储于 **OCI Always Free 托管 MySQL (`rin-heatwave`)**，Redis 复用现有 K3s 集群并固定在 OCI `free-arm-vm`。
+`my-litellm-service` is an enterprise-grade LLM unified gateway and evaluation middleware service built on **K3s + ArgoCD + existing Kong Gateway + OCI MySQL HeatWave**. The project adopts a decoupled multi-cloud architecture combining **LiteLLM Proxy + FastAPI + OCI MySQL + existing K3s Redis**, providing multi-model routing failover, granular token/USD cost auditing, Redis caching acceleration, and automated LLM benchmark evaluation support. Persistent data is stored in **OCI Always Free Managed MySQL (`rin-heatwave`)**, while Redis reuses the existing K3s cluster pinned to the OCI `free-arm-vm` node.
 
-## 📚 项目文档 (Documentation)
+## 📚 Documentation
 
-详细的技术需求规格说明书与架构设计文档请见 `docs/` 目录：
+For detailed technical specifications, architecture designs, and operations guides, refer to the `docs/` directory:
 
-* 📄 **[High-Level Implementation Plan (docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)](docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)** - 包含整体目标、技术架构、接口定义、数据库 Schema 及分阶段实施 Roadmap。
-* 📐 **[技术架构图与流程说明 (docs/ARCHITECTURE.md)](docs/ARCHITECTURE.md)** - 组件数据流图、Kubernetes Deployment 拆分与 Kong/ArgoCD 部署说明。
-* 🧰 **[Phase 1 低层实施计划 (docs/plans/phase_1_low_level_implementation.md)](docs/plans/phase_1_low_level_implementation.md)** - 逐文件、逐方法说明基础设施接入与 LiteLLM Proxy 启动步骤。
+* 📄 **[High-Level Implementation Plan (docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)](docs/HIGH_LEVEL_IMPLEMENTATION_PLAN.md)** - High-level goals, technical architecture, API definitions, database schemas, and phased roadmap.
+* 📐 **[Technical Architecture & Flow Diagrams (docs/ARCHITECTURE.md)](docs/ARCHITECTURE.md)** - Component data flow, Kubernetes Deployment breakdown, and Kong / ArgoCD integration specs.
+* 🧰 **[Phase 1 Low-Level Implementation Plan (docs/plans/phase_1_low_level_implementation.md)](docs/plans/phase_1_low_level_implementation.md)** - File-by-file and step-by-step low-level implementation guide for bootstrapping LiteLLM Proxy.
 
-## 🛠️ 技术栈 (Tech Stack)
+## 🛠️ Tech Stack
 
-* **Infrastructure**: Tencent Cloud K3s 集群、OCI `free-arm-vm` 节点、ArgoCD、现有 Kong Gateway
+* **Infrastructure**: Tencent Cloud K3s cluster, OCI `free-arm-vm` node, ArgoCD, existing Kong Gateway
 * **API Gateway**: LiteLLM Proxy (Unified OpenAI-compatible API)
 * **Backend Middleware**: Python 3.12, FastAPI, Uvicorn, Pydantic
 * **Database & Cache**: OCI MySQL HeatWave Always Free 9.7+ (Cost & Request Logging), existing K3s Redis 7+ via Kong L4 and Tailscale (Rate Limiting & Caching)

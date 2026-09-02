@@ -1,10 +1,10 @@
-# 技术架构与数据流设计 (Technical Architecture & Data Flow)
+# Technical Architecture & Data Flow Design
 
-本文档补充说明 `my-litellm-service` 的底层架构设计、服务间通信流程、四大核心模块职责映射、FastAPI 目录结构，以及 K3s + ArgoCD + Kong 部署架构与容灾切换逻辑。
+This document details the underlying architectural design, inter-service communication flows, responsibility mappings across the four core modules, the FastAPI directory layout, and the K3s + ArgoCD + Kong deployment topology and failover logic for `my-litellm-service`.
 
 ---
 
-## 1. 系统网络与进程部署拓扑 (Network & Process Topology)
+## 1. Network & Process Topology
 
 ```mermaid
 graph TB
@@ -42,19 +42,19 @@ graph TB
 
 ---
 
-## 2. 四大核心模块与进程职责映射 (Module Responsibilities)
+## 2. Core Module & Process Responsibilities
 
 ```mermaid
 graph TB
-    subgraph MODULES["四大业务模块 (System Modules)"]
-        M1["模块一: 多模型路由与自动降级<br/>(Routing & Failover)"]
-        M2_W["模块二(写): Token 计量与费用落库<br/>(Async Ingestion)"]
-        M2_R["模块二(读): 消费统计报表<br/>(Spend Reporting API)"]
-        M3["模块三: 本地客观评测引擎<br/>(Eval Harness: Option A+B)"]
-        M4["模块四: 限流与缓存<br/>(Rate Limit & Prompt Cache)"]
+    subgraph MODULES["Core System Modules"]
+        M1["Module 1: Multi-Model Routing & Failover<br/>(Routing & Failover)"]
+        M2_W["Module 2 (Write): Token Metering & Cost Ingestion<br/>(Async Ingestion)"]
+        M2_R["Module 2 (Read): Spend Reporting & Metrics<br/>(Spend Reporting API)"]
+        M3["Module 3: Objective Local Evaluation Engine<br/>(Eval Harness: Option A+B)"]
+        M4["Module 4: Rate Limiting & Caching<br/>(Rate Limit & Prompt Cache)"]
     end
 
-    subgraph PROCS["运行时进程与服务架构 (Runtime Distribution)"]
+    subgraph PROCS["Runtime Processes & Service Architecture"]
         subgraph PROC_A["Service A: LiteLLM Deployment (:4000)"]
             P_Router["Router & Model Fallback"]
             P_Rate["Redis RateLimiter & Cache Hook"]
@@ -70,70 +70,68 @@ graph TB
         end
     end
 
-    M1 ==>|配置驱动| P_Router
-    M4 ==>|Redis 中间件| P_Rate
-    M2_W ==>|异步 Hook| P_Log
+    M1 ==>|Config Driven| P_Router
+    M4 ==>|Redis Middleware| P_Rate
+    M2_W ==>|Async Hook| P_Log
 
-    M2_R ==>|FastAPI 路由| R_Metrics
-    M3 ==>|FastAPI 路由| R_Eval
-    R_Eval -->|调用核心算法| E_Engine
+    M2_R ==>|FastAPI Route| R_Metrics
+    M3 ==>|FastAPI Route| R_Eval
+    R_Eval -->|Execute Core Logic| E_Engine
 ```
 
-| 模块 | 模块名称 | 承载进程 | 核心职责与实现机制 |
+| Module | Module Name | Host Process | Core Responsibility & Mechanism |
 | :--- | :--- | :--- | :--- |
-| **模块一** | 多模型路由与自动降级 (Routing & Failover) | **Service A: LiteLLM Deployment** | `config.yaml` 声明 OpenAI / Vertex AI Gemini / Anthropic 模型列表与自动 Fallback 降级规则。 |
-| **模块二 (写)** | 开销审计与 Token 计量 (Data Ingestion) | **Service A: LiteLLM Deployment** | 请求完成后异步 Callback 触发，无感写入 OCI MySQL `llm_request_logs` 表。 |
-| **模块二 (读)** | 开销审计与报表 API (Reporting) | **Service B: FastAPI Deployment** | 暴露 `GET /v1/metrics/spend` 接口，查询并汇总数据库中的模型耗费与请求报表。 |
-| **模块三** | 本地客观评测引擎 (Eval Harness) | **Service B: FastAPI Deployment** | 暴露 `POST /v1/eval/run` 接口，使用 `asyncio` 并发测试多模型，执行 Option A (断言) 与 Option B (黄金匹配) 校验。 |
-| **模块四** | 限流与缓存 (Rate Limit & Cache) | **Service A: LiteLLM Deployment** | 连接现有 K3s Redis 7+（Redis Pod 固定于 OCI `free-arm-vm`，通过 Kong L4 访问），处理 RPM/TPM 速率拦截与 Exact Prompt 哈希缓存；项目不部署本地 Redis。 |
+| **Module 1** | Multi-Model Routing & Failover | **Service A: LiteLLM Deployment** | Declarative configuration in `config.yaml` defining OpenAI / Vertex AI Gemini / Anthropic model lists and automated fallback rules. |
+| **Module 2 (Write)** | Cost Auditing & Token Metering (Ingestion) | **Service A: LiteLLM Deployment** | Triggered asynchronously post-request via custom callbacks, non-blockingly writing logs into the OCI MySQL `llm_request_logs` table. |
+| **Module 2 (Read)** | Cost Auditing & Spend Reporting API | **Service B: FastAPI Deployment** | Exposes the `GET /v1/metrics/spend` endpoint to aggregate and query model spend and request statistics from the database. |
+| **Module 3** | Local Objective Evaluation Engine (Eval Harness) | **Service B: FastAPI Deployment** | Exposes the `POST /v1/eval/run` endpoint using `asyncio` for concurrent multi-model benchmarking against Option A (assertions) and Option B (golden matches). |
+| **Module 4** | Rate Limiting & Caching | **Service A: LiteLLM Deployment** | Connects to the existing K3s Redis 7+ instance (pinned to the OCI `free-arm-vm` and reachable via Kong L4) for RPM/TPM throttling and exact prompt hash caching without deploying a local Redis. |
 
 ---
 
-## 3. 单仓库代码与部署目录结构 (Repository Layout)
+## 3. Monorepo & Deployment Layout
 
-项目采用 **One Repository, Two Deployments**：LiteLLM Gateway 与 FastAPI
-Application 是两个独立的 Kubernetes Deployment，但共用同一个 Git 仓库、
-`pyproject.toml`、`uv.lock`、Docker 镜像和 Python 3.12 运行环境。
+The project follows a **One Repository, Two Deployments** architecture: LiteLLM Gateway and FastAPI Application run as two separate Kubernetes Deployments while sharing the same Git repository, `pyproject.toml`, `uv.lock`, Docker image, and Python 3.12 runtime environment.
 
 ```text
 my-litellm-service/
 ├── README.md
-├── pyproject.toml                 # 统一依赖与项目配置
-├── uv.lock                        # 统一依赖锁定文件
-├── .env.example                   # 非敏感配置模板
+├── pyproject.toml                 # Unified dependencies and project configuration
+├── uv.lock                        # Locked dependencies file
+├── .env.example                   # Template for non-sensitive configuration
 ├── .gitignore
-├── config.yaml                    # Service A: LiteLLM 路由/Fallback/缓存配置
-├── Dockerfile                     # 构建供两个 Deployment 共用的镜像
+├── config.yaml                    # Service A: LiteLLM routing/fallback/cache config
+├── Dockerfile                     # Unified multi-stage container build for both deployments
 │
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                    # Service B: FastAPI 应用入口
+│   ├── main.py                    # Service B: FastAPI application entry point
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── config.py              # 环境变量与配置校验
-│   │   ├── database.py            # OCI MySQL 异步连接池
-│   │   └── redis.py               # Redis 异步连接池
+│   │   ├── config.py              # Environment variable parsing and validation
+│   │   ├── database.py            # OCI MySQL async connection pool
+│   │   └── redis.py               # Redis async connection pool
 │   ├── callbacks/
 │   │   ├── __init__.py
-│   │   └── cost_logger.py         # Service A: 费用日志异步落库
+│   │   └── cost_logger.py         # Service A: Async cost logging hook
 │   ├── eval/
 │   │   ├── __init__.py
-│   │   ├── evaluators.py          # Option A/B 评测算法
-│   │   └── service.py             # 并发调用 LiteLLM
+│   │   ├── evaluators.py          # Option A/B evaluation algorithms
+│   │   └── service.py             # Concurrent LiteLLM dispatch engine
 │   ├── models/
 │   │   ├── __init__.py
-│   │   └── schemas.py             # FastAPI Pydantic 模型
+│   │   └── schemas.py             # FastAPI Pydantic request/response schemas
 │   └── routers/
 │       ├── __init__.py
 │       ├── eval.py                # POST /v1/eval/run
 │       ├── metrics.py             # GET /v1/metrics/spend
-│       └── health.py              # FastAPI 健康检查
+│       └── health.py              # FastAPI health check
 │
 ├── scripts/
 │   ├── __init__.py
-│   ├── check_phase1.py            # MySQL/Redis 连通性检查
-│   ├── smoke_proxy.py             # LiteLLM 烟囱测试
-│   └── init_db.sql                # Phase 2: MySQL DDL
+│   ├── check_phase1.py            # MySQL/Redis connectivity verification
+│   ├── smoke_proxy.py             # LiteLLM proxy smoke testing
+│   └── init_db.sql                # Phase 2: MySQL DDL schema
 │
 ├── tests/
 │   ├── test_config.py
@@ -150,7 +148,7 @@ my-litellm-service/
 │       ├── litellm-service.yaml
 │       ├── fastapi-deployment.yaml
 │       ├── fastapi-service.yaml
-│       └── ingress.yaml            # 由现有 Kong 处理入口
+│       └── ingress.yaml            # Ingress managed via existing Kong
 │
 └── docs/
     ├── ARCHITECTURE.md
@@ -158,90 +156,86 @@ my-litellm-service/
     └── plans/
 ```
 
-### 3.1 FastAPI (Service B) 代码结构
+### 3.1 FastAPI (Service B) Code Layout
 
 ```
 app/
-├── main.py                  # FastAPI 主程序入口 (注册各种 APIRouter)
+├── main.py                  # FastAPI entry point (registers APIRouters)
 ├── core/
-│   ├── config.py            # 读取 .env 环境变量
-│   └── database.py          # OCI MySQL (aiomysql) 与 Redis 异步连接池
-├── eval/                    # 模块三：评测引擎内部逻辑
-│   ├── evaluators.py        # Option A (Schema/断言) & Option B (Golden 比对) 算法
-│   └── service.py           # asyncio 并发向 LiteLLM 发送测试请求
+│   ├── config.py            # Loads .env and environment settings
+│   └── database.py          # OCI MySQL (aiomysql) and Redis connection pools
+├── eval/                    # Module 3: Evaluation engine internal logic
+│   ├── evaluators.py        # Option A (Schema/assertion) & Option B (Golden match) logic
+│   └── service.py           # asyncio concurrent request dispatcher to LiteLLM
 ├── routers/
-│   ├── eval.py              # 模块三路由: POST /v1/eval/run
-│   └── metrics.py           # 模块二路由: GET /v1/metrics/spend
+│   ├── eval.py              # Module 3 router: POST /v1/eval/run
+│   └── metrics.py           # Module 2 router: GET /v1/metrics/spend
 └── models/
-    └── schemas.py           # Pydantic 数据请求与响应校验模型
+    └── schemas.py           # Pydantic data validation schemas
 ```
 
-`app/callbacks/` 属于 LiteLLM Service A 的扩展逻辑；`app/eval/`、
-`app/routers/` 和 `app/main.py` 属于 FastAPI Service B。两个服务不会创建
-各自独立的虚拟环境，也不会拆分成两个代码仓库。
+`app/callbacks/` belongs to the extension logic of LiteLLM Service A; `app/eval/`, `app/routers/`, and `app/main.py` belong to FastAPI Service B. The two services do not require isolated virtual environments or separate code repositories.
 
 ---
 
-## 4. 请求处理与数据流 (Request Processing Flow)
+## 4. Request Processing & Data Flow
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Client as 客户端 / Eval Harness
+    actor Client as Client / Eval Harness
     participant Proxy as LiteLLM Proxy (:4000)
     participant Redis as Redis Cache/Limiter (:6379)
-    participant LLM as 上游 LLM (OpenAI / Vertex AI)
+    participant LLM as Upstream LLM (OpenAI / Vertex AI)
     participant DB as OCI MySQL (:3306)
 
     Client->>Proxy: POST /v1/chat/completions
-    Proxy->>Redis: 检查速率限制 (RPM/TPM) & Prompt 缓存
-    alt 缓存命中 (Cache Hit)
-        Redis-->>Proxy: 返回已缓存的 Response
-        Proxy-->>Client: 200 OK (极速响应 <5ms)
-    else 缓存未命中 / 允许通过 (Cache Miss)
-        Proxy->>LLM: 转发请求至主模型 (如 gpt-4o)
-        alt 主模型调用成功
-            LLM-->>Proxy: 返回模型生成结果
-        else 主模型失败 (429 / 500 / 超时)
-            Proxy->>LLM: 自动触发 Fallback 降级 (如 gemini-1.5-pro)
-            LLM-->>Proxy: 返回备用模型生成结果
+    Proxy->>Redis: Check Rate Limits (RPM/TPM) & Prompt Cache
+    alt Cache Hit
+        Redis-->>Proxy: Return cached Response
+        Proxy-->>Client: 200 OK (Sub-5ms ultra-fast response)
+    else Cache Miss / Allowed Through
+        Proxy->>LLM: Forward request to primary model (e.g., gpt-4o)
+        alt Primary Call Succeeded
+            LLM-->>Proxy: Return generated response
+        else Primary Call Failed (429 / 500 / Timeout)
+            Proxy->>LLM: Automatically trigger Fallback (e.g., gemini-1.5-pro)
+            LLM-->>Proxy: Return fallback response
         end
-        Proxy-->>Client: 200 OK (返回标准 OpenAI 格式)
-        Proxy--)DB: 异步 Hook 落库 (Token 数/USD 费用/耗时)
+        Proxy-->>Client: 200 OK (Standard OpenAI format)
+        Proxy--)DB: Async Hook persist log (Tokens / USD Cost / Latency)
     end
 ```
 
-当客户端或评估工具向服务发起请求时，整体数据流向如下：
+When a client or benchmarking harness makes a request to the service, the end-to-end data flow operates as follows:
 
-1. **请求接入 (Ingress)**：
-   * 客户端向 FastAPI (`:8000/v1/eval/run`) 或直接向 LiteLLM Proxy (`:4000/v1/chat/completions`) 发送符合 OpenAI 规范的 JSON 请求。
-2. **限流与缓存拦截 (Rate Limiting & Caching Check)**：
-   * LiteLLM Proxy 通过 Tailscale 与 Kong L4 连接现有 **K3s Redis**，检查该 API Key 的当前分钟调用计数（RPM / TPM）。若超限则直接返回 `429 Too Many Requests`。
-   * 若启用了 Response Cache，匹配 Redis 中相同的 Prompt hash；若命中则直接返回缓存结果。
-3. **模型路由与自动重试 (Routing & Fallback)**：
-   * LiteLLM 根据配置路由到指定的底层 API（如 OpenAI `gpt-4o` 或 Vertex AI `gemini-1.5-pro`）。
-   * 若目标 API 发生异常或超时，代理根据 `config.yaml` 自动重试备用模型。
-4. **日志与计费落库 (Async Cost Logging)**：
-   * 请求完成后，LiteLLM 异步提取响应中的 Token 数量与耗时，计算 USD 费用，并将日志保存至 **OCI MySQL HeatWave** 数据表 `llm_request_logs`。
-5. **响应返回 (Response)**：
-   * 将标准的 OpenAI 格式响应数据返回给客户端。
+1. **Ingress**:
+   * The client sends an OpenAI-compatible JSON request either to FastAPI (`:8000/v1/eval/run`) or directly to LiteLLM Proxy (`:4000/v1/chat/completions`).
+2. **Rate Limiting & Caching Check**:
+   * LiteLLM Proxy connects to the existing **K3s Redis** over Tailscale and Kong L4, verifying the per-minute calling counter (RPM / TPM) for the given API Key. If limits are exceeded, it immediately returns `429 Too Many Requests`.
+   * If Response Caching is enabled, it hashes the prompt to locate matching Redis keys; on a cache hit, the cached response is returned immediately.
+3. **Routing & Fallback**:
+   * LiteLLM routes the request to the upstream target API (such as OpenAI `gpt-4o` or Vertex AI `gemini-1.5-pro`) based on the routing rules.
+   * If the target API throws an error or times out, LiteLLM automatically retries using the configured fallback models defined in `config.yaml`.
+4. **Async Cost Logging**:
+   * Upon completion, LiteLLM asynchronously parses token usage and latency from the response, computes USD costs, and persists the transaction log to the **OCI MySQL HeatWave** `llm_request_logs` table.
+5. **Response Delivery**:
+   * The standard OpenAI-compatible response payload is returned to the client.
 
 ---
 
-## 5. K3s + ArgoCD + Kong 部署策略
+## 5. K3s + ArgoCD + Kong Deployment Strategy
 
-Service A 和 Service B 使用两个独立的 Kubernetes `Deployment`，分别运行在
-独立 Pod 中，但继续共用本仓库的代码、`pyproject.toml`、`uv.lock` 和依赖体系。
-容器内部不创建两个 venv；镜像只构建一套 Python 3.12 运行环境，通过不同入口
-程序和端口区分两个服务：
+Service A and Service B use two separate Kubernetes `Deployment` manifests running in isolated Pods, while sharing the same codebase, `pyproject.toml`, `uv.lock`, and dependency definitions.
+No separate virtual environments are needed inside the container; the container image builds a single Python 3.12 runtime environment, differentiating the two services via their command entry points and ports:
 
 ```text
-同一个 Python 3.12 镜像/依赖环境
+Single Python 3.12 Container Image & Dependency Environment
 ├── litellm --config config.yaml --port 4000  -> Service A
 └── uvicorn app.main:app --port 8000         -> Service B
 ```
 
-推荐资源布局：
+Recommended Kubernetes resource structure:
 
 ```text
 deploy/k8s/
@@ -252,28 +246,23 @@ deploy/k8s/
 ├── litellm-service.yaml       # ClusterIP :4000
 ├── fastapi-deployment.yaml
 ├── fastapi-service.yaml       # ClusterIP :8000
-└── ingress.yaml               # 由现有 Kong 处理入口
+└── ingress.yaml               # Ingress handled via existing Kong
 ```
 
-两个 Deployment 初期可通过 `nodeSelector` 固定到 OCI `free-arm-vm`，但必须设置
-合理的 `resources.requests`、`resources.limits`，避免与 Redis、Kong 争抢节点资源。
-不使用 `hostNetwork`，也不在应用 Pod 中绑定节点端口。
+Both Deployments can initially be pinned to the OCI `free-arm-vm` via `nodeSelector`, but reasonable `resources.requests` and `resources.limits` must be enforced to avoid resource contention with Redis and Kong. Do not use `hostNetwork` or bind host ports on application Pods.
 
-ArgoCD 的 Application 负责指定目标 K3s 集群、命名空间和 manifest 路径；Kubernetes
-manifest 负责镜像、端口、探针、资源限制和节点调度。建议沿用两层 GitOps 职责：
+ArgoCD Application manifests specify the target K3s cluster, namespace, and manifest path; Kubernetes manifests define the container images, ports, health probes, resource limits, and node scheduling. A two-layer GitOps model is recommended:
 
-- 本仓库：应用源码、Dockerfile、LiteLLM 配置和 `deploy/k8s/` workload manifests。
-- `my-argocd-manifests`：ArgoCD Application 注册文件，只负责把本仓库同步到目标集群。
+- This repository: Application source code, Dockerfile, LiteLLM configuration, and `deploy/k8s/` workload manifests.
+- `my-argocd-manifests`: ArgoCD Application definitions responsible exclusively for syncing this repository to the target cluster.
 
-Service B 通过集群内 DNS 调用 LiteLLM：
+Service B calls LiteLLM internally via in-cluster DNS:
 
 ```text
 http://litellm-proxy.llm-system.svc.cluster.local:4000
 ```
 
-外部流量统一经过现有 Kong Gateway；不新增第二个 Kong。LiteLLM 和 FastAPI 是否
-对外暴露，由 Kong 的 HTTPRoute/Ingress 规则决定；Redis 继续使用现有 Kong L4
-TCP 转发，不在本项目内重新部署 Redis。
+External inbound traffic is routed through the existing Kong Gateway without introducing a second Kong instance. Whether LiteLLM and FastAPI are exposed publicly is determined by Kong's HTTPRoute/Ingress configuration; Redis continues to be routed via the existing Kong L4 TCP proxy and is not redeployed in this project.
 
 ---
 *End of Architectural Specification.*

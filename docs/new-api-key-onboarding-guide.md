@@ -1,57 +1,57 @@
-# 新增 LLM API Key 标准接入与配置指南 (New API Key Onboarding Guide)
+# New API Key Onboarding Standard Operating Guide
 
-本文档为 `my-litellm-service` 统一网关在引入新的上游大模型 API Key（例如新增第二个 Gemini 免费 Key、Anthropic Claude Key、OpenAI 官方 Key 等）时的**标准规范化接入操作指引**。
+This document defines the **standardized operating procedure for onboarding new upstream LLM API keys** (e.g., secondary Gemini keys, Anthropic Claude keys, OpenAI keys) to the `my-litellm-service` unified gateway.
 
-整个接入链路严格遵循 **Zero Secrets in Git（代码仓库零机密）**、**12-Factor 配置解耦** 与 **GitOps 声明式发布** 原则。
+The workflow adheres strictly to **Zero Secrets in Git**, **12-Factor Configuration Decoupling**, and **Declarative GitOps Delivery**.
 
 ---
 
-## 1. 跨层架构与改动全景图
+## 1. Cross-Layer Architecture & Mutation Scope
 
-当引入一个新 API Key 时，各层级组件的职责与修改范围如下：
+When provisioning a new API Key, layer responsibilities and required modifications are structured as follows:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 1. 云端机密托管层 (OCI Vault: litellm-prod)                                   │
-│    新建 Secret 对象 (例如: litellm-openai-api-key-free-2)                     │
+│ 1. Cloud Secret Management Tier (OCI Vault: litellm-prod)                   │
+│    Create Secret resource (e.g., litellm-openai-api-key-free-2)             │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │ (ESO 自动化按需拉取)
+                                       │ (Automated sync via ESO)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 2. GitOps 清单仓库 (my-argocd-manifests)                                    │
-│    修改文件: argocd-apps/litellm-svc-app.yaml                                │
-│    - a. externalSecret.data: 声明新 Key 到 Kubernetes Secret 的映射关系      │
-│    - b. configMap.data["config.yaml"]: 在 model_list 中挂载新 Key 并配置路由  │
+│ 2. GitOps Manifest Repository (my-argocd-manifests)                         │
+│    Target File: argocd-apps/litellm-svc-app.yaml                            │
+│    - a. externalSecret.data: Map OCI Secret key to Kubernetes Secret key    │
+│    - b. configMap.data["config.yaml"]: Mount key in model_list & router     │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │ (ArgoCD 自动同步并热更新 Pod)
+                                       │ (ArgoCD reconciliation & rolling update)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 3. 应用代码仓库 (my-litellm-service)                                         │
-│    修改文件:                                                                 │
-│    - config.yaml: 本地模型路由配置同步                                       │
-│    - .env.example: 补充新环境变量占位符                                      │
-│    - app/core/config.py: 在 Settings 类中追加 Pydantic 类型校验支持          │
-│    - .env (本地未跟踪私密文件): 本地开发与单元测试注入                        │
+│ 3. Application Codebase (my-litellm-service)                                │
+│    Target Files:                                                            │
+│    - config.yaml: Mirror model routing configuration locally                │
+│    - .env.example: Add environment variable placeholder                    │
+│    - app/core/config.py: Update Pydantic Settings validation schema         │
+│    - .env (local untracked secret file): Inject secret for local testing    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. 详细执行步骤 (Step-by-Step)
+## 2. Step-by-Step Execution Guide
 
-### 第一步：在 OCI Vault 创建云端机密 (Layer 1)
+### Step 1: Create Cloud Secret in OCI Vault (Layer 1)
 
-> ⚠️ **安全红线**：真实密钥绝不进入 Git 仓库，必须通过 OCI 托管 Vault 加密存储。
+> ⚠️ **Security Policy**: Real API keys must never be committed to Git; they must reside encrypted within OCI Vault.
 
-1. **登录 OCI 控制台或使用 OCI CLI**；
-2. **定位目标 Vault**：
-   - **Compartment**：`litellm-prod`
-   - **Vault**：`litellm-vault`
-   - **Master Encryption Key**：`litellm-secrets-key`
-3. **创建新 Secret**：
-   - **Secret 名称规范**：`litellm-<provider>-api-key-<alias>`（例如 `litellm-openai-api-key-free-2`）
-   - **Secret 格式**：纯文本（Plaintext）或 Base64 编码的 API Key 字符串。
-4. **CLI 快速创建示例**：
+1. **Log in to OCI Console or initialize OCI CLI**;
+2. **Locate target Vault**:
+   - **Compartment**: `litellm-prod`
+   - **Vault**: `litellm-vault`
+   - **Master Encryption Key**: `litellm-secrets-key`
+3. **Create Secret**:
+   - **Naming Convention**: `litellm-<provider>-api-key-<alias>` (e.g., `litellm-openai-api-key-free-2`)
+   - **Format**: Plaintext or Base64-encoded secret string.
+4. **CLI Creation Example**:
    ```bash
    VAULT_OCID=$(oci kms management vault list --compartment-id "<COMPARTMENT_OCID>" --query "data[?\"display-name\"=='litellm-vault'].id | [0]" --raw-output)
    KEY_OCID=$(oci kms management key list --compartment-id "<COMPARTMENT_OCID>" --endpoint "<VAULT_MANAGEMENT_ENDPOINT>" --query "data[?\"display-name\"=='litellm-secrets-key'].id | [0]" --raw-output)
@@ -66,13 +66,13 @@
 
 ---
 
-### 第二步：修改 GitOps 清单仓库 (Layer 2: `my-argocd-manifests`)
+### Step 2: Update GitOps Manifests (Layer 2: `my-argocd-manifests`)
 
-* **目标代码仓库**：`nvd11/my-argocd-manifests`
-* **目标文件路径**：`argocd-apps/litellm-svc-app.yaml`
+* **Repository**: `nvd11/my-argocd-manifests`
+* **File Path**: `argocd-apps/litellm-svc-app.yaml`
 
-#### 2.1 修改 `externalSecret.data` (声明机密同步映射)
-在 Helm values 的 `externalSecret.data` 中追加新字段映射：
+#### 2.1 Update `externalSecret.data` (Declare Secret Synchronization Mapping)
+Append the new secret mapping under `externalSecret.data`:
 
 ```yaml
 externalSecret:
@@ -88,7 +88,7 @@ externalSecret:
     - secretKey: OPENAI_API_KEY_FREE_1
       remoteRef:
         key: litellm-openai-api-key-free-1
-    # 🎯 新增下行：将 OCI 的 litellm-openai-api-key-free-2 映射为容器环境变量 OPENAI_API_KEY_FREE_2
+    # Maps OCI secret litellm-openai-api-key-free-2 to Pod environment variable OPENAI_API_KEY_FREE_2
     - secretKey: OPENAI_API_KEY_FREE_2
       remoteRef:
         key: litellm-openai-api-key-free-2
@@ -100,8 +100,8 @@ externalSecret:
         key: litellm-redis-password
 ```
 
-#### 2.2 修改 `configMap.data["config.yaml"]` (配置模型负载均衡与路由)
-在 `model_list` 中增加使用新环境变量的条目，并在 `router_settings` 开启负载均衡与重试：
+#### 2.2 Update `configMap.data["config.yaml"]` (Configure Routing & Load Balancing)
+Add the deployment item using the new environment variable in `model_list`, and configure `router_settings`:
 
 ```yaml
 configMap:
@@ -111,13 +111,13 @@ configMap:
     NO_PROXY: "localhost,127.0.0.1,10.0.0.0/8,.svc,.cluster.local"
     config.yaml: |
       model_list:
-        # Key 1 实例
+        # Key 1 Instance
         - model_name: gemini-3.6-flash-freelayer
           litellm_params:
             model: gemini/gemini-3.6-flash
             api_key: os.environ/OPENAI_API_KEY_FREE_1
             rpm: 15
-        # 🎯 新增：Key 2 实例（同名模型组，自动负载均衡）
+        # Key 2 Instance (Same logical model alias for automated load balancing)
         - model_name: gemini-3.6-flash-freelayer
           litellm_params:
             model: gemini/gemini-3.6-flash
@@ -125,10 +125,10 @@ configMap:
             rpm: 15
 
       router_settings:
-        routing_strategy: "least-busy" # 自动选择最空闲的 Key
-        num_retries: 3                # 遇到 429 自动换 Key 重试
+        routing_strategy: "least-busy" # Dispatches to least loaded key
+        num_retries: 3                # Switches keys upon encountering 429
         retry_after: 5
-        cooldown_time: 30             # 429 熔断冷却 30 秒
+        cooldown_time: 30             # Quarantines throttled key for 30 seconds
 
       litellm_settings:
         cache: true
@@ -143,72 +143,72 @@ configMap:
 
 ---
 
-### 第三步：修改应用源码仓库 (Layer 3: `my-litellm-service`)
+### Step 3: Update Application Source Code (Layer 3: `my-litellm-service`)
 
-* **目标代码仓库**：`nvd11/my-litellm-service`
+* **Repository**: `nvd11/my-litellm-service`
 
-#### 3.1 同步本地 `config.yaml`
-保持本地 `config.yaml` 与 GitOps 中的配置一致，便于本地开发与冒烟测试。
+#### 3.1 Synchronize Local `config.yaml`
+Keep local `config.yaml` aligned with GitOps configurations for local smoke testing.
 
-#### 3.2 更新 `.env.example`
-向环境变量模板补充无害占位符：
+#### 3.2 Update `.env.example`
+Append placeholder keys to the template:
 ```env
 # Google Gemini API
 OPENAI_API_KEY_FREE_1=replace-with-gemini-api-key-1
 OPENAI_API_KEY_FREE_2=replace-with-gemini-api-key-2
 ```
 
-#### 3.3 更新 `app/core/config.py` (Pydantic 配置校验类)
-在 `Settings` 类中添加可选或必填字段支持：
+#### 3.3 Update `app/core/config.py` (Pydantic Settings Validation)
+Add the field to the `Settings` class:
 ```python
 class Settings(BaseSettings):
     # ...
     openai_api_key_free_1: SecretStr
-    openai_api_key_free_2: SecretStr | None = None  # 👈 新增
+    openai_api_key_free_2: SecretStr | None = None  # Optional secondary key
     # ...
 ```
 
-#### 3.4 更新本地 `.env` (本地生效)
-在本地未提交的 `.env` 中填写真实密钥，用于本地运行与测试：
+#### 3.4 Update Local `.env`
+Add the actual API key to the untracked local `.env` for development:
 ```env
 OPENAI_API_KEY_FREE_2=AIzaSy...
 ```
 
 ---
 
-## 3. 验收与验证流程 (Verification Checklist)
+## 3. Verification Checklist
 
-完成上述配置并提交 Git 后，执行以下标准验证步骤：
+After committing and pushing changes, verify end-to-end functionality:
 
-### 1. 验证 OCI Secret 同步到 Kubernetes
+### 1. Verify OCI Secret Synchronization to Kubernetes
 ```bash
-# 检查 ExternalSecret 是否同步成功
+# Check ExternalSecret sync status
 kubectl get externalsecret litellm-secrets -n llm-system
 
-# 验证生成的 Kubernetes Secret 包含新 Key 字段（输出不含明文）
+# Verify generated Secret keys (output masks plaintext)
 kubectl get secret litellm-secrets -n llm-system -o jsonpath='{.data}' | jq 'keys'
-# 预期包含: ["LITELLM_MASTER_KEY", "OPENAI_API_KEY_FREE_1", "OPENAI_API_KEY_FREE_2", "REDIS_PASSWORD"]
+# Expected: ["LITELLM_MASTER_KEY", "OPENAI_API_KEY_FREE_1", "OPENAI_API_KEY_FREE_2", "REDIS_PASSWORD"]
 ```
 
-### 2. 验证 ArgoCD 自动发布
+### 2. Verify ArgoCD Deployment Reconciliation
 ```bash
-# 检查 ArgoCD 应用状态
+# Check ArgoCD Application status
 kubectl get application litellm-svc -n argocd
-# 预期状态: Synced / Healthy
+# Expected: Synced / Healthy
 
-# 检查目标集群 Pod 滚动更新状态
+# Check Pod rolling update status
 kubectl get pods -n llm-system -o wide
-# 预期状态: 1/1 Running, 0 重启
+# Expected: 1/1 Running, 0 restarts
 ```
 
-### 3. 验证公网 API 负载均衡与连通性
+### 3. Verify Public API Load Balancing & Invocations
 ```bash
 MASTER_KEY=$(kubectl get secret -n llm-system litellm-secrets -o jsonpath='{.data.LITELLM_MASTER_KEY}' | base64 -d)
 
-# 发送连续多次测试请求
+# Send sequential verification requests
 for i in {1..5}; do
   curl -s -X POST "https://gw.jpgcp.cloud/litellm/v1/chat/completions" \
-    -H "Authorization: Bearer ${MASTER_KEY}" \
+    -H "Authorization: Bearer *** \
     -H "Content-Type: application/json" \
     -d '{
       "model": "gemini-3.6-flash-freelayer",
@@ -220,11 +220,11 @@ done
 
 ---
 
-## 4. 常见问题排查速查表 (Troubleshooting)
+## 4. Troubleshooting Reference Matrix
 
-| 异常现象 | 可能原因 | 排查命令与解决方案 |
+| Symptom | Probable Cause | Diagnostic Command & Resolution |
 | :--- | :--- | :--- |
-| `SecretSyncedError / 404 NotAuthorized` | OCI 上的 Secret 名称与 `remoteRef.key` 不匹配，或 IAM 缺少解密权限 | 检查 `oci vault secret list`，确保名称完全一致；确认 Policy 包含 `use keys`。 |
-| Pod 报 `ValueError: Either 'host' or 'url' must be specified` | `config.yaml` 引用了未注入的环境变量 | 检查 `ConfigMap` 中的 `config.yaml`，非敏感地址（如 Redis 域名）建议直接内聚在 YAML 中。 |
-| 频繁报 429 且未自动切换 | `model_name` 未保持完全一致，未能聚合成同一个模型负载均衡组 | 检查 `model_list` 中所有条目的 `model_name` 必须完全相同。 |
-| 客户端报 `504 Gateway Timeout` | 复杂推理/思考模型耗时较长，超过网关默认超时 | 在 `Service` 或 `HTTPRoute` 注解中配置 `konghq.com/read-timeout: "180000"`。 |
+| `SecretSyncedError / 404 NotAuthorized` | OCI Secret name mismatches `remoteRef.key`, or IAM lacks KMS decryption privileges | Check `oci vault secret list`; verify policy includes `use keys` and `use key-delegate`. |
+| Pod crashes with `ValueError: Either 'host' or 'url' must be specified` | `config.yaml` references an unbound environment variable | Check `config.yaml` in `ConfigMap`; embed non-sensitive endpoints (like Redis DNS) directly in YAML. |
+| Repeated 429 without automatic key failover | `model_name` strings do not match across deployment items | Verify all deployment entries in `model_list` share the identical `model_name` string to form a unified routing group. |
+| Client receives `504 Gateway Timeout` | Complex reasoning models exceed gateway default timeout | Add `konghq.com/read-timeout: "180000"` to `Service` or `HTTPRoute` annotations. |

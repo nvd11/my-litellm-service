@@ -1,12 +1,12 @@
-# GitHub Actions 构建中重复 Tag 的排查与处理
+# Troubleshooting and Handling Tag Mutation in GitHub Actions CI
 
-在给 LiteLLM 服务增加多架构镜像构建时，我们遇到了一个容易被误解的问题：同一个 Git commit 再次运行 GitHub Actions 后，GHCR 中相同的镜像 tag 仍然存在，但它指向的 digest 发生了变化。
+When adding multi-architecture image builds for the LiteLLM service, we encountered a commonly misunderstood issue: when GitHub Actions was re-run for the exact same Git commit, the same image tag remained in GHCR, but the digest it pointed to changed.
 
-表面上看，这像是“GHCR 里出现了两个相同 tag 的镜像”。实际情况更准确：镜像仓库中的包仍然是同一个，tag 也仍然是同一个，只是这个 tag 的指向被后一次构建更新了。真正需要解决的不是 tag 数量，而是部署系统是否依赖了一个会漂移的引用。
+On the surface, this appeared as if "GHCR had two images with the same tag." The reality is more accurate: the package in the container registry remained the same, and the tag remained the same, but the tag pointer was updated by the subsequent build. What needed solving was not the tag count, but whether the deployment system depended on a mutable, drifting reference.
 
-## 先看 CI 到底生成了什么
+## What CI Actually Generates
 
-当前工作流使用 Docker Metadata Action 生成三类 tag：
+The current workflow uses the Docker Metadata Action to generate three types of tags:
 
 ```yaml
 tags: |
@@ -15,15 +15,15 @@ tags: |
   type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 ```
 
-这三行不是把三个字符串拼成一个 tag，而是生成一个 tag 列表：
+These three lines do not concatenate three strings into one tag; rather, they generate a list of tags:
 
-| 配置 | 生成示例 | 用途 |
+| Configuration | Example Output | Purpose |
 | --- | --- | --- |
-| `type=sha,format=long` | `sha-83f9320cae408be95d25512d01bd2f0a0ee12dba` | 按 commit 追踪构建来源 |
-| `type=ref,event=tag` | `v2.0.0` | 发布版本 tag 触发时使用 |
-| `type=raw,value=latest` | `latest` | `main` 分支的便捷入口 |
+| `type=sha,format=long` | `sha-83f9320cae408be95d25512d01bd2f0a0ee12dba` | Track build origin by commit SHA |
+| `type=ref,event=tag` | `v2.0.0` | Triggered upon release version tags |
+| `type=raw,value=latest` | `latest` | Convenience pointer for the `main` branch |
 
-多架构构建只构建一次镜像发布结果：
+A multi-architecture build produces a single published image result:
 
 ```text
 linux/amd64 manifest
@@ -32,15 +32,15 @@ linux/arm64 manifest
 Manifest Index
 ```
 
-三个 tag 都可以指向同一个 Manifest Index。它们是同一个发布结果的三个名字，不是三个独立的镜像版本。一个 Manifest Index 再通过平台信息指向 amd64 和 arm64 的具体 manifest。
+All three tags point to the same Manifest Index. They are three distinct names for the same publication artifact, not three independent image versions. The Manifest Index then points to specific amd64 and arm64 manifests based on platform metadata.
 
-## 问题是怎样被发现的
+## How the Problem Was Discovered
 
-最初的假设是：完整 commit SHA 生成的 `sha-*` tag 应该足够稳定，因为同一个 commit 不会改变。于是 ArgoCD 可以使用这个 tag 部署镜像。
+The initial assumption was that the `sha-*` tag generated from the full commit SHA should be sufficiently stable because the commit itself never changes. Therefore, ArgoCD could deploy the image using this tag.
 
-为了验证这个假设，我们先让 CI 构建并推送多架构镜像，再记录 `docker/build-push-action` 输出的 digest。之后对同一个 commit 再次执行 `workflow_dispatch`，比较两次构建结果。
+To validate this assumption, we ran CI to build and push the multi-arch image and recorded the digest output by `docker/build-push-action`. Then, we triggered `workflow_dispatch` again for the same commit and compared the two build results.
 
-第一次构建得到：
+The first build produced:
 
 ```text
 Commit: 00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1
@@ -48,100 +48,100 @@ Tag:    sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1
 Digest: sha256:b81db335962aec0b90b2c39bc47e0619feeb9237d65d9f121b4a1391aee2a420
 ```
 
-同一个 commit 再次构建后，tag 名称没有变化，但 digest 变成：
+Rebuilding the same commit kept the tag name identical, but the digest changed to:
 
 ```text
 Tag:    sha-00d8238c28dc8afe4ace3c96cb326c91c9d9f0c1
 Digest: sha256:f3e227d791124398e055678603b82c89e566cc2b2532d70d2af25d227c8e6704
 ```
 
-这次对比说明了两个事实：
+This comparison highlighted two fundamental facts:
 
-1. commit SHA 只描述源码版本，不描述一次具体的镜像构建结果。
-2. `sha-*` tag 并不是严格不可变的引用，重复构建可以让它指向新的 Manifest Index。
+1. A commit SHA only describes the source code version, not a specific container image build artifact.
+2. The `sha-*` tag is not a strictly immutable reference; repeated builds can repoint it to a newly generated Manifest Index.
 
-构建结果可能因为基础镜像更新、依赖解析、BuildKit provenance、SBOM 或其他构建元数据变化而不同。因此“源码 commit 相同”不等于“镜像 digest 必然相同”。
+Build artifacts can vary due to base image updates, dependency resolution, BuildKit provenance attestations, SBOM metadata, or build timestamps. Therefore, "identical source commit" does not equal "identical image digest."
 
-## Tag 和 Digest 的关系
+## Relationship Between Tag and Digest
 
-镜像地址通常有两种写法：
+Image addresses are typically expressed in two ways:
 
 ```text
 ghcr.io/nvd11/my-litellm-svc:sha-<commit>
 ghcr.io/nvd11/my-litellm-svc@sha256:<digest>
 ```
 
-tag 是仓库中的可读名称，类似一个可以被重新指向的别名。digest 是镜像内容及其 Manifest Index 的内容寻址标识，内容不同，digest 就不同。
+A tag is a human-readable alias in the registry that can be repointed at any time. A digest is a content-addressable identifier of the image payload and its Manifest Index; if any bit of content or metadata changes, the digest changes.
 
-因此，两次构建可能产生这样的关系：
+Thus, two successive builds produce the following mapping:
 
 ```text
-sha-<commit> ───────→ digest-A   第一次构建
-sha-<commit> ───────→ digest-B   第二次构建
+sha-<commit> ───────→ digest-A   (Build 1)
+sha-<commit> ───────→ digest-B   (Build 2)
 ```
 
-这里不是两个 tag 同时拥有相同名字，而是后一次 push 更新了 tag 的指向。旧的 digest 仍可能存在于 registry 中，但不能再通过这个 tag 找到它。
+This is not two tags coexisting with the same name, but rather the subsequent push updating where the tag points. The old digest may still exist in the registry, but it can no longer be retrieved using the tag.
 
-对于 ArgoCD 来说，使用 tag 的问题是：清单内容没有变化，镜像实际内容却可能变化。ArgoCD 的 Git revision 没有改变，部署引用却已经漂移，这不利于审计、回滚和复现。
+For ArgoCD, relying on tags introduces a drift hazard: the Git manifest remains unchanged, yet the actual deployed container image can drift. When ArgoCD's Git revision does not change but the deployed runtime changes, auditing, rollbacks, and reproducibility are compromised.
 
-## 评估过的方案
+## Evaluated Solutions
 
-### 方案一：继续使用 commit SHA tag
+### Option 1: Continue Using Commit SHA Tags
 
-例如：
+Example:
 
 ```text
 ghcr.io/nvd11/my-litellm-svc:sha-83f9320cae408be95d25512d01bd2f0a0ee12dba
 ```
 
-优点是改动最少，tag 直观，也能看出源码来源。
+**Pros**: Minimal code changes, intuitive tags, clear traceability to source code.
 
-问题是它依赖“同一个 commit 只构建一次”这个流程约束。手动重跑、失败重试、构建环境变化都可能覆盖同一个 tag。它适合作为追踪标签，不适合作为严格的部署引用。
+**Cons**: Relies on the fragile operational constraint that "each commit is built exactly once." Manual re-runs, retries on failure, or CI environment updates can overwrite the tag. It works well as a tracking label, but not as an immutable deployment target.
 
-### 方案二：给 tag 增加时间戳或 Run ID
+### Option 2: Append Timestamp or Run ID to Tags
 
-例如：
+Examples:
 
 ```text
 sha-<commit>-run-<run-id>
 sha-<commit>-<timestamp>
 ```
 
-优点是每次构建都有唯一 tag，不会覆盖之前的 tag。
+**Pros**: Every build produces a unique tag, avoiding tag overwrites.
 
-缺点是部署系统必须处理新的 tag 生成规则，ArgoCD 清单更新逻辑也要同步修改。时间戳还会增加格式和时区处理问题，Run ID 则把 GitHub Actions 的实现细节带入镜像版本命名。对于已有使用 `image.tag` 的旧服务，也会增加兼容成本。
+**Cons**: The deployment system must parse complex tag naming schemes, and ArgoCD manifest update scripts must be refactored. Timestamps introduce timezone and format parsing issues, while Run IDs leak CI execution details into image version strings. It also creates backward compatibility overhead for legacy services using `image.tag`.
 
-这个方案能够解决 tag 覆盖，但没有解决“部署应该锁定镜像内容”这个根本问题：部署仍然依赖 tag 管理。
+While this avoids tag mutation, it fails to solve the underlying problem: deployment still relies on tag management instead of cryptographic content locking.
 
-### 方案三：构建前删除旧 manifest
+### Option 3: Delete Old Manifests Prior to Build
 
-思路是发现相同 tag 已存在时，先删除旧版本，再推送新版本。
+The idea is to query whether a tag exists, delete the old version from the registry, and then push the new version.
 
-这个方案不采用。删除 registry 内容会增加权限和竞态条件，构建失败时还可能造成原有引用失效。多个 CI 运行同时操作时，删除和推送的顺序也难以保证。它把一个引用管理问题变成了 registry 数据清理问题。
+This option was rejected. Deleting registry artifacts increases permission requirements and introduces race conditions. If the subsequent build fails, existing deployment references break. When concurrent CI runs execute, deletion and push ordering cannot be guaranteed. It turns a reference management issue into an error-prone registry cleanup problem.
 
-### 方案四：改造所有旧服务，统一改用 digest
+### Option 4: Refactor All Legacy Services to Use Digests
 
-从长期看，所有服务使用 digest 是合理方向，但这次不适合作为 LiteLLM 部署的最小变更。现有 Quarkus、FastAPI 等服务依赖旧的 `update-image-tag.yml`，直接修改会扩大影响范围，也会把一次新服务接入变成全仓库迁移。
+Long-term, pinning all services to digests is best practice, but doing so would violate the principle of minimal blast radius for LiteLLM deployment. Existing Quarkus, FastAPI, and other services rely on the legacy `update-image-tag.yml`. Modifying that pipeline globally would expand scope and turn a single service rollout into a repo-wide migration.
 
-因此保留旧 workflow，让旧应用继续使用 `image.tag`；为支持 digest 的新应用增加独立流程。
+Therefore, the legacy workflow is preserved so existing applications continue using `image.tag`, while an isolated workflow is introduced for new services supporting digests.
 
-### 方案五：使用 digest pinning
+### Option 5: Digest Pinning
 
-最终采用这个方案。CI 继续生成 tag，方便人查看构建来源；但 ArgoCD 不使用 tag，而是使用构建完成后得到的 Manifest Index digest：
+This was the chosen solution. CI continues generating tags for human traceability, but ArgoCD deploys directly using the Manifest Index digest output upon build completion:
 
 ```text
 ghcr.io/nvd11/my-litellm-svc@sha256:<digest>
 ```
 
-优点是部署引用直接绑定镜像内容，不受 `latest`、commit tag 或重复构建影响。回滚时只需要把 GitOps 清单中的 digest 改回已知值，审计记录也能准确对应到实际发布内容。
+**Pros**: Deployment references bind directly to immutable content, immune to `latest` drift, commit tag overwrites, or rebuild variations. Rollbacks simply require reverting the GitOps digest to a known previous value, guaranteeing exact auditability.
 
-代价是需要修改通用 Helm Chart，并增加一条专门更新 digest 的 GitOps workflow。这个代价是局部的，而且只影响新接入 digest 的应用。
+**Trade-offs**: Requires minor updates to the shared Helm Chart and a dedicated GitOps workflow to update digests. This overhead is localized and strictly impacts services opted into digest pinning.
 
-## 最终实现
+## Final Implementation
 
-### 1. CI 记录 Manifest Index digest
+### 1. CI Captures Manifest Index Digest
 
-构建步骤增加了 ID：
+The build step was assigned an explicit step ID:
 
 ```yaml
 - name: Build and push image
@@ -149,7 +149,7 @@ ghcr.io/nvd11/my-litellm-svc@sha256:<digest>
   uses: docker/build-push-action@v6
 ```
 
-之后从 `steps.build.outputs.digest` 读取最终 digest，并写入 GitHub Actions Summary：
+The resulting digest is read from `steps.build.outputs.digest` and emitted to the GitHub Actions Job Summary:
 
 ```yaml
 - name: Record manifest digest
@@ -157,11 +157,11 @@ ghcr.io/nvd11/my-litellm-svc@sha256:<digest>
     echo "Digest: ${{ steps.build.outputs.digest }}"
 ```
 
-这里记录的是多架构 Manifest Index digest，不是某一个 amd64 或 arm64 子 manifest 的 digest。ArgoCD 在 ARM 节点拉取这个 index 后，会根据节点架构选择对应镜像。
+This captures the multi-arch Manifest Index digest, not an isolated amd64 or arm64 sub-manifest digest. When ArgoCD pulls this index on an ARM node, the container runtime automatically selects the matching ARM64 architecture image.
 
-### 2. Helm Chart 支持 digest 优先
+### 2. Helm Chart Supports Digest Prioritization
 
-`generic-web-service-v2` 增加了可选的 `image.digest`：
+`generic-web-service-v2` added support for an optional `image.digest`:
 
 ```yaml
 image:
@@ -169,106 +169,106 @@ image:
   digest: sha256:<manifest-index-digest>
 ```
 
-模板的选择规则是：
+The template rendering logic is:
 
 ```text
-image.digest 存在
+If image.digest is present:
     → repository@digest
 
-image.digest 不存在
+If image.digest is absent:
     → repository:tag
 ```
 
-LiteLLM 使用 digest 时最终渲染为：
+When LiteLLM uses digests, it renders as:
 
 ```text
 ghcr.io/nvd11/my-litellm-svc@sha256:<manifest-index-digest>
 ```
 
-这项能力发布在 `generic-web-service-v2` `v2.1.0`，没有修改旧的 v1 Chart。
+This feature was released in `generic-web-service-v2` `v2.1.0` without modifying the legacy v1 Chart.
 
-### 3. 新建独立的 GitOps digest workflow
+### 3. Dedicated GitOps Digest Workflow
 
-旧的：
+The legacy workflow:
 
 ```text
 .github/workflows/update-image-tag.yml
 ```
 
-继续处理使用 `image.tag` 的旧服务。
+Continues handling legacy services that use `image.tag`.
 
-新增的：
+The new workflow:
 
 ```text
 .github/workflows/update-app-image-digest.yml
 ```
 
-只处理支持 `image.digest` 的新 Application。它通过 `repository_dispatch` 接收：
+Exclusively handles new Applications supporting `image.digest`. It is triggered via `repository_dispatch`:
 
 ```json
 {
   "event_type": "update-app-image-digest",
   "client_payload": {
     "svc_name": "litellm-svc",
-    "image_digest": "sha256:<64位十六进制 digest>"
+    "image_digest": "sha256:<64-hex-char-digest>"
   }
 }
 ```
 
-workflow 会检查服务名、digest 格式和目标文件是否存在，然后更新：
+The workflow validates the service name, verifies the digest format, ensures the target file exists, and updates:
 
 ```text
 argocd-apps/litellm-svc-app.yaml
 ```
 
-更新使用的是结构明确的 `digest:` 行，而不是继续用旧 workflow 的 tag 正则去猜测字段。这避免了 tag 和 digest 两种格式互相误匹配。
+Updates target the explicit `digest:` key structure rather than relying on regex heuristic guessing from the old tag workflow, preventing cross-matching errors between tag and digest formats.
 
-### 4. CI 在 push 成功后触发更新
+### 4. CI Triggers Update After Successful Push
 
-应用 CI 的完整流程变为：
+The end-to-end application CI lifecycle is:
 
 ```text
 Checkout
   ↓
 Build amd64 + arm64
   ↓
-Push GHCR
+Push to GHCR
   ↓
-读取 Manifest Index digest
+Extract Manifest Index digest
   ↓
-repository_dispatch
+Trigger repository_dispatch
   ↓
-GitOps workflow 更新 image.digest
+GitOps workflow updates image.digest
   ↓
-ArgoCD 根据 Git 变化同步
+ArgoCD synchronizes cluster state from Git
 ```
 
-dispatch 受到 Repository Variable 控制：
+The dispatch is governed by a Repository Variable:
 
 ```text
 ENABLE_GITOPS_DIGEST_DISPATCH=true
 ```
 
-首次 Bootstrap 阶段保持关闭，因为 Application 文件必须先存在，并且需要先用一个已经存在的 digest 完成首次部署。首次同步并验证健康后，才启用这个变量。
+This remains disabled during the initial bootstrap phase, as the Application manifest must first exist and be deployed with an initial digest. Once verified and healthy, the variable is toggled on.
 
-dispatch 使用的 token 存在 GitHub Actions Secret：
+The dispatch authentication uses a GitHub Actions Secret:
 
 ```text
 ARGOCD_MANIFESTS_DISPATCH_TOKEN
 ```
 
-CI 还会检查 digest 是否符合 `sha256:<64 位十六进制>` 格式，并要求 GitHub API 返回 HTTP `204`。镜像 push 失败或 dispatch 失败时，CI 不报告成功，避免 GitOps 清单指向不存在的镜像。
+CI validates that the digest matches the `sha256:<64-hex-chars>` regex and requires an HTTP `204` response from the GitHub API. If image push or dispatch fails, CI fails fast, preventing GitOps manifests from referencing invalid images.
 
-## 结果
+## Summary
 
-这次处理没有试图让所有 tag 都变成不可变，也没有通过删除旧 manifest 来维持表面上的唯一性。tag 继续承担追踪和人工操作的职责，digest 承担部署锁定的职责：
+This architecture does not attempt to enforce immutability across all tags, nor does it rely on destructive manifest deletions in the registry. Tags remain for human tracking and inspection, while digests enforce immutable deployment locking:
 
 ```text
-Tag     → 方便查找和追踪
-Digest  → 锁定实际镜像内容
+Tag     → Human discovery and version tracking
+Digest  → Immutable deployment locking
 ```
 
-最终 LiteLLM 的 ArgoCD 清单使用：
+LiteLLM's ArgoCD manifest uses:
 
 ```yaml
 image:
@@ -276,14 +276,13 @@ image:
   digest: sha256:<manifest-index-digest>
 ```
 
-这种分工保留了现有 CI 的可读性，也避免了重复构建覆盖 tag 对部署结果造成影响。对当前项目来说，这是修改范围、兼容性和发布可追溯性之间最合适的平衡。
+This division preserves CI readability while insulating deployments from rebuild mutations and tag drifts. It provides the optimal balance of scope, backward compatibility, and release traceability.
 
-## 相关提交
+## Relevant Commits
 
 ```text
-83f9320  记录 Manifest Index digest
-0893308  generic-web-service-v2 支持 digest pinning
-9425e10  新增 GitOps digest workflow 和 LiteLLM Application
-923a6fd  应用 CI 增加 push 后 digest dispatch
+83f9320  Record Manifest Index digest in CI
+0893308  Support digest pinning in generic-web-service-v2
+9425e10  Add GitOps digest workflow and LiteLLM Application manifest
+923a6fd  Add post-push digest dispatch in application CI
 ```
-

@@ -1,24 +1,24 @@
-# Phase 1 低层实施计划：基础设施接入与 LiteLLM Proxy 启动
+# Phase 1 Low-Level Implementation Plan: Infrastructure Integration & LiteLLM Proxy Startup
 
-> **目标**：在 K3s 部署环境完成网络确认，连接现有 OCI MySQL 与 K3s Redis，配置 LiteLLM Proxy 的模型路由/降级/缓存，并完成不产生 LLM 费用的启动验收。
+> **Goal**: Complete network verification in the K3s deployment environment, connect to existing OCI MySQL and K3s Redis instances, configure LiteLLM Proxy model routing/fallbacks/caching, and complete startup acceptance without incurring LLM costs.
 
-> **阶段边界**：本阶段只验证数据库和 Redis 的基础连通性并启动 LiteLLM Proxy。请求费用异步落库、MySQL 业务表、FastAPI、评测引擎和正式限流策略分别属于 Phase 2/3/4，不在本阶段实现。
+> **Phase Boundary**: This phase only verifies basic connectivity to the database and Redis, and starts the LiteLLM Proxy. Asynchronous request cost logging, MySQL business tables, FastAPI, evaluation engine, and formal rate limiting strategies belong to Phase 2/3/4 respectively, and are not implemented in this phase.
 
-## 1. Phase 1 完成标准
+## 1. Phase 1 Acceptance Criteria
 
-完成后必须满足：
+Upon completion, the following criteria must be met:
 
-1. K3s 应用节点能访问 OCI MySQL `10.0.0.247:3306` 与现有 Redis `100.105.130.0:6379`（或集群内 Redis Service）。
-2. MySQL 使用真实账号执行 `SELECT 1` 成功；Redis 使用认证执行 `PING` 返回 `PONG`。
-3. LiteLLM Proxy 能在 `:4000` 启动，`GET /health` 返回成功。
-4. `/v1/models` 能看到项目声明的模型别名。
-5. 使用一个明确指定的模型完成一次 OpenAI 兼容聊天请求，并验证返回结构；该请求属于付费调用，必须显式执行。
-6. 主模型故障时，LiteLLM 按配置尝试备用模型；本阶段至少完成配置静态检查，真实故障演练需控制费用。
-7. 所有密码、API Key 和数据库连接信息只存在于未提交的 `.env`，仓库中只保留占位符。
+1. K3s application nodes can access OCI MySQL `10.0.0.247:3306` and existing Redis `100.105.130.0:6379` (or in-cluster Redis Service).
+2. MySQL executes `SELECT 1` successfully with real credentials; Redis executes authenticated `PING` returning `PONG`.
+3. LiteLLM Proxy starts on `:4000`, and `GET /health` returns success.
+4. `/v1/models` displays the model aliases declared by the project.
+5. An OpenAI-compatible chat completion request is executed with a clearly specified model and verified for correct response structure; this request is a paid call and must be explicitly executed.
+6. When the primary model fails, LiteLLM attempts fallback models according to configuration; this phase requires at least static configuration checks, while real fault drills must strictly control costs.
+7. All passwords, API keys, and database connection strings reside solely in the untracked `.env` file; the repository maintains only placeholders.
 
-## 2. 目录与文件清单
+## 2. Directory and File Inventory
 
-Phase 1 实现后，新增或修改的文件应限定为：
+After Phase 1 implementation, new or modified files must be strictly limited to:
 
 ```text
 .
@@ -42,31 +42,31 @@ Phase 1 实现后，新增或修改的文件应限定为：
     └── test_connectivity.py
 ```
 
-本阶段不创建 `app/main.py`、`app/routers/`、`app/eval/` 或数据库 Hook；这些文件属于 FastAPI/审计阶段。
+This phase does not create `app/main.py`, `app/routers/`, `app/eval/`, or database hooks; these files belong to the FastAPI/Auditing phases.
 
-## 3. Python 依赖与虚拟环境
+## 3. Python Dependencies & Virtual Environment
 
 ### 3.1 `pyproject.toml`
 
-使用 Python 3.12，使用 `uv` 解析和安装依赖；项目元数据与依赖声明统一放在 `pyproject.toml`，锁定结果写入 `uv.lock`。
+Use Python 3.12, utilizing `uv` for dependency resolution and installation; project metadata and dependency declarations are consolidated in `pyproject.toml`, with locked results written to `uv.lock`.
 
-运行依赖：
+Runtime dependencies:
 
-- `litellm`：Proxy CLI 和模型路由。
-- `pydantic-settings`：读取 `.env` 并校验配置。
-- `aiomysql`：异步执行 MySQL 连通性查询。
-- `redis[hiredis]`：异步 Redis 客户端与快速 RESP 解析。
-- `httpx`：调用 LiteLLM 健康检查、模型列表和聊天接口。
+- `litellm`: Proxy CLI and model routing.
+- `pydantic-settings`: Reads `.env` and validates configurations.
+- `aiomysql`: Asynchronously executes MySQL connectivity checks.
+- `redis[hiredis]`: Async Redis client with fast RESP parsing.
+- `httpx`: Invokes LiteLLM health checks, model lists, and chat endpoints.
 
-开发依赖使用 PEP 735 dependency group：
+Development dependencies using PEP 735 dependency groups:
 
-- `pytest`、`pytest-asyncio`：单元测试。
-- `ruff`：静态检查。
-- `pyyaml`：读取并静态检查 `config.yaml`。
+- `pytest`, `pytest-asyncio`: Unit testing.
+- `ruff`: Static code analysis and linting.
+- `pyyaml`: Reads and statically checks `config.yaml`.
 
-`pyproject.toml` 至少包含 `[project]`、`[dependency-groups]` 和 `[tool.ruff]`；不需要配置发布到 PyPI 的流程。
+`pyproject.toml` must contain at least `[project]`, `[dependency-groups]`, and `[tool.ruff]`; PyPI package publishing configuration is not required.
 
-必须提供以下 `uv run` 命令：
+The following `uv run` commands must be supported:
 
 ```bash
 uv run python -m scripts.check_phase1
@@ -75,9 +75,9 @@ uv run pytest -q
 uv run ruff check app scripts tests
 ```
 
-### 3.2 虚拟环境
+### 3.2 Virtual Environment
 
-在仓库根目录创建唯一虚拟环境 `.venv`，LiteLLM Proxy、后续 FastAPI 服务与连接检查脚本共用，不为两个服务进程创建两个 venv。两个服务通过各自的入口程序分别启动：LiteLLM 使用 `.venv/bin/litellm`，FastAPI 使用 `.venv/bin/uvicorn`。使用 `uv` 管理环境和锁文件：
+Create a single virtual environment `.venv` at the repository root, shared across LiteLLM Proxy, future FastAPI services, and connectivity check scripts. Do not create separate virtualenvs for the two service processes. The two services start via their respective entrypoints: LiteLLM uses `.venv/bin/litellm`, FastAPI uses `.venv/bin/uvicorn`. Manage environment and lockfiles with `uv`:
 
 ```bash
 uv venv --python 3.12
@@ -85,13 +85,13 @@ uv lock
 uv sync --dev
 ```
 
-日常运行通过 `uv run ...` 使用该环境，不要求手动 `source .venv/bin/activate`。如果需要进入交互式 shell，再执行 `source .venv/bin/activate`。
+Daily operations execute via `uv run ...` without requiring manual `source .venv/bin/activate`. If entering an interactive shell is needed, execute `source .venv/bin/activate`.
 
-## 4. 环境变量模板
+## 4. Environment Variable Template
 
 ### 4.1 `.env.example`
 
-只声明变量名和无效占位符：
+Declare variable names with placeholder values only:
 
 ```env
 # OCI MySQL HeatWave
@@ -118,90 +118,90 @@ LITELLM_PORT=4000
 FASTAPI_PORT=8000
 ```
 
-真实 `.env` 必须加入 `.gitignore`。密码不允许出现在 `config.yaml`、Python 默认值、测试 fixture、日志或 commit message 中。
+The real `.env` must be added to `.gitignore`. Passwords must never appear in `config.yaml`, Python defaults, test fixtures, logs, or commit messages.
 
-## 5. 配置加载模块
+## 5. Configuration Loading Module
 
 ### 5.1 `app/core/config.py`
 
-该文件只负责配置解析和校验，不执行网络连接。
+This file is responsible solely for configuration parsing and validation; it does not perform network connections.
 
 #### `class Settings(BaseSettings)`
 
-字段与约束：
+Fields and constraints:
 
-- `mysql_host: str`、`mysql_port: int`、`mysql_user: str`、`mysql_password: SecretStr`、`mysql_db: str`。
-- `redis_host: str`、`redis_port: int`、`redis_password: SecretStr`。
-- `openai_api_key: SecretStr`、`anthropic_api_key: SecretStr`。
-- `vertexai_project: str`、`vertexai_location: str`。
-- `litellm_master_key: SecretStr`、`litellm_port: int = 4000`。
-- `connect_timeout_seconds: float = 5.0`。
+- `mysql_host: str`, `mysql_port: int`, `mysql_user: str`, `mysql_password: SecretStr`, `mysql_db: str`.
+- `redis_host: str`, `redis_port: int`, `redis_password: SecretStr`.
+- `openai_api_key: SecretStr`, `anthropic_api_key: SecretStr`.
+- `vertexai_project: str`, `vertexai_location: str`.
+- `litellm_master_key: SecretStr`, `litellm_port: int = 4000`.
+- `connect_timeout_seconds: float = 5.0`.
 
-配置类必须使用 `SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')`，并通过字段类型拒绝非法端口和空必填值。
+The configuration class must use `SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')`, rejecting invalid ports and empty required values via field types.
 
 #### `get_settings() -> Settings`
 
-使用 `functools.lru_cache` 返回单例配置，避免每个检查函数重新读取 `.env`。测试时通过 `get_settings.cache_clear()` 清理缓存。
+Uses `functools.lru_cache` to return a singleton configuration instance, preventing each check function from re-reading `.env`. Tests clear cache via `get_settings.cache_clear()`.
 
 #### `redacted_summary(settings: Settings) -> dict[str, object]`
 
-返回可安全打印的主机、端口、数据库名和 Proxy 端口；所有 `SecretStr` 只输出 `***`，绝不调用 `get_secret_value()` 生成日志。
+Returns safely printable hosts, ports, database names, and proxy ports; all `SecretStr` fields output `***` only, never calling `get_secret_value()` in logs.
 
-## 6. 基础设施连通性模块
+## 6. Infrastructure Connectivity Module
 
 ### 6.1 `app/core/connectivity.py`
 
-该文件提供只读健康检查，并保证连接失败不会泄露密码或完整连接串。
+This file provides read-only health checks and guarantees connection failures do not leak passwords or full connection strings.
 
 #### `@dataclass(frozen=True) class CheckResult`
 
-字段：`name: str`、`ok: bool`、`latency_ms: float | None`、`detail: str`。`detail` 只允许白名单错误摘要，例如 `connected`、`authentication_failed`、`timeout`、`connection_refused`。
+Fields: `name: str`, `ok: bool`, `latency_ms: float | None`, `detail: str`. `detail` permits whitelisted error summaries only, e.g., `connected`, `authentication_failed`, `timeout`, `connection_refused`.
 
 #### `async def check_mysql(settings: Settings) -> CheckResult`
 
-实现要求：
+Implementation requirements:
 
-1. 使用 `aiomysql.connect(host=..., port=..., user=..., password=..., db=..., connect_timeout=...)` 建立连接。
-2. 创建 cursor，执行参数固定为 `SELECT 1`，不执行建表、写入或事务提交。
-3. 读取一行并确认结果为 `1`。
-4. 在 `finally` 中关闭 cursor 和 connection。
-5. 将 `OperationalError` 映射为 `connection_refused`、`timeout` 或 `authentication_failed`；其他异常映射为 `unexpected_error`，不返回异常原文中的密码或 DSN。
-6. 使用 `time.perf_counter()` 计算毫秒延迟。
+1. Establish connection using `aiomysql.connect(host=..., port=..., user=..., password=..., db=..., connect_timeout=...)`.
+2. Create cursor, executing fixed parameter `SELECT 1`; do not execute table creation, writes, or transaction commits.
+3. Fetch one row and confirm the result equals `1`.
+4. Close cursor and connection in `finally` block.
+5. Map `OperationalError` to `connection_refused`, `timeout`, or `authentication_failed`; map other exceptions to `unexpected_error`, omitting raw exception text containing passwords or DSNs.
+6. Calculate millisecond latency using `time.perf_counter()`.
 
 #### `async def check_redis(settings: Settings) -> CheckResult`
 
-实现要求：
+Implementation requirements:
 
-1. 使用 `redis.asyncio.Redis(host=..., port=..., password=..., socket_connect_timeout=..., socket_timeout=..., decode_responses=True)` 创建客户端。
-2. 执行 `await client.ping()`，结果必须为真。
-3. 在 `finally` 中执行 `await client.aclose()`。
-4. 将认证错误、超时、拒绝连接分别映射为稳定的摘要字符串，不打印密码。
+1. Create client using `redis.asyncio.Redis(host=..., port=..., password=..., socket_connect_timeout=..., socket_timeout=..., decode_responses=True)`.
+2. Execute `await client.ping()`, which must evaluate to true.
+3. Execute `await client.aclose()` in `finally` block.
+4. Map authentication errors, timeouts, and refused connections to stable summary strings without printing passwords.
 
 #### `async def check_all(settings: Settings) -> list[CheckResult]`
 
-使用 `asyncio.gather(check_mysql(settings), check_redis(settings))` 并发检查两个远端依赖；返回顺序固定为 MySQL、Redis，便于 CLI 和测试断言。
+Use `asyncio.gather(check_mysql(settings), check_redis(settings))` to concurrently check both remote dependencies; return order is fixed as MySQL, Redis for predictable CLI and test assertions.
 
-## 7. Phase 1 检查 CLI
+## 7. Phase 1 Verification CLI
 
 ### 7.1 `scripts/check_phase1.py`
 
 #### `async def run_checks() -> int`
 
-1. 调用 `get_settings()`。
-2. 打印 `redacted_summary()`。
-3. 调用 `check_all()`。
-4. 以表格形式打印每个依赖的 `OK/FAIL`、延迟和安全摘要。
-5. 两项均成功返回 `0`，任一失败返回 `1`。
+1. Call `get_settings()`.
+2. Print `redacted_summary()`.
+3. Call `check_all()`.
+4. Print tabular output with `OK/FAIL`, latency, and safety summaries for each dependency.
+5. Return `0` if both checks succeed; return `1` if either fails.
 
 #### `def main() -> None`
 
-使用 `asyncio.run(run_checks())`，并通过 `raise SystemExit(main())` 提供模块入口。未捕获异常只能输出通用错误，不输出 `.env` 内容。
+Invoke `asyncio.run(run_checks())` and provide module entrypoint via `raise SystemExit(main())`. Uncaught exceptions must output generic errors without displaying `.env` contents.
 
-## 8. LiteLLM 配置文件
+## 8. LiteLLM Configuration File
 
 ### 8.1 `config.yaml`
 
-配置必须包含以下模型别名，并确保 fallback 引用的每个别名都存在于 `model_list`：
+The configuration must declare the following model aliases, ensuring every alias referenced in fallbacks exists in `model_list`:
 
 ```yaml
 model_list:
@@ -236,105 +236,105 @@ router_settings:
   num_retries: 1
 ```
 
-启用 Redis Response Cache 时：
+When enabling Redis Response Cache:
 
-- `REDIS_HOST`、`REDIS_PORT` 和 `REDIS_PASSWORD` 必须从环境变量读取。
-- `supported_call_types` 至少包含 `chat_completion`。
-- TTL 初始值为 `3600` 秒。
-- Redis 连接超时必须小于 API 请求超时，Redis 故障时允许跳过缓存，不得阻止 Proxy 启动。
+- `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD` must be read from environment variables.
+- `supported_call_types` must contain at least `chat_completion`.
+- Initial TTL is set to `3600` seconds.
+- Redis connection timeout must be strictly less than API request timeout; on Redis failure, caching is bypassed without blocking Proxy startup.
 
-Phase 1 不在 `config.yaml` 中配置费用数据库 callback 或 `database_url`；那部分要等 Phase 2 的表结构和异步 Hook 一起实现。
+Phase 1 does not configure cost database callbacks or `database_url` in `config.yaml`; that will be implemented alongside Phase 2 table schemas and async hooks.
 
-## 9. Proxy 烟囱测试脚本
+## 9. Proxy Smoke Test Script
 
 ### 9.1 `scripts/smoke_proxy.py`
 
 #### `async def get_health(client: httpx.AsyncClient) -> dict`
 
-调用 `GET /health`，要求 HTTP 2xx；返回状态码和 JSON 摘要，不打印任何密钥。
+Calls `GET /health`, requiring HTTP 2xx; returns status code and JSON summary without printing keys.
 
 #### `async def get_models(client: httpx.AsyncClient) -> set[str]`
 
-调用 `GET /v1/models`，解析 `data[].id`，返回模型别名集合；响应格式错误时抛出可读的校验异常。
+Calls `GET /v1/models`, parses `data[].id`, and returns a set of model aliases; raises readable validation errors on malformed responses.
 
 #### `async def send_chat(client: httpx.AsyncClient, model: str, prompt: str) -> dict`
 
-只有显式传入 `--send-chat` 才调用。发送最小请求：一个 user message、低 `max_tokens`，记录响应状态、模型名和 usage 是否存在；禁止把完整响应内容写入日志。
+Invoked only when `--send-chat` is explicitly passed. Sends minimal request: single user message, low `max_tokens`; records response status, model name, and usage presence; writing full response bodies to logs is prohibited.
 
 #### `async def run(base_url: str, master_key: str, model: str | None, send_chat: bool) -> int`
 
-按顺序执行 health、models、可选 chat；默认不产生上游 LLM 费用。缺少目标模型时返回 `1`，全部成功返回 `0`。
+Executes health, models, and optional chat in sequence; incurs zero upstream LLM cost by default. Returns `1` if target model is missing, `0` if all pass.
 
 #### `def main() -> None`
 
-解析 `--base-url`、`--model`、`--send-chat` 参数，读取 `LITELLM_MASTER_KEY`，使用 `asyncio.run(run(...))` 启动。
+Parses `--base-url`, `--model`, `--send-chat` arguments, reads `LITELLM_MASTER_KEY`, and starts via `asyncio.run(run(...))`.
 
-## 10. 单元测试
+## 10. Unit Tests
 
 ### 10.1 `tests/test_config.py`
 
 #### `def test_settings_load_from_environment(monkeypatch)`
 
-注入最小合法环境变量，断言主机、端口和 Proxy 端口读取正确；断言 Secret 不会出现在 `redacted_summary()` 中。
+Injects minimal valid environment variables, asserting host, port, and proxy port load correctly; asserts Secrets do not appear in `redacted_summary()`.
 
 #### `def test_settings_rejects_invalid_port(monkeypatch)`
 
-注入非数字或越界端口，断言 `ValidationError`。
+Injects non-numeric or out-of-range ports, asserting `ValidationError`.
 
 #### `def test_redacted_summary_does_not_expose_secrets(monkeypatch)`
 
-使用标记字符串作为密码，断言摘要中不存在该字符串。
+Uses sentinel string as password, asserting the string does not exist in summary.
 
 ### 10.2 `tests/test_connectivity.py`
 
-所有网络客户端必须通过 monkeypatch/mock 注入，单元测试不得访问真实 MySQL、Redis 或 LLM。
+All network clients must be injected via monkeypatch/mock; unit tests must not access real MySQL, Redis, or LLM endpoints.
 
 #### `async def test_check_mysql_success(mock_aiomysql)`
 
-模拟 `SELECT 1` 返回 `(1,)`，断言 `ok is True` 并验证连接关闭。
+Mocks `SELECT 1` returning `(1,)`, asserting `ok is True` and verifying connection is closed.
 
 #### `async def test_check_mysql_auth_failure(mock_aiomysql)`
 
-模拟认证异常，断言 `ok is False` 且 detail 不含密码。
+Mocks authentication error, asserting `ok is False` and detail contains no password.
 
 #### `async def test_check_redis_success(mock_redis)`
 
-模拟 `ping()` 返回真值，断言客户端执行关闭。
+Mocks `ping()` returning truthy, asserting client executes close.
 
 #### `async def test_check_all_has_stable_order(mock_dependencies)`
 
-模拟两个依赖成功，断言返回顺序为 `mysql`、`redis`。
+Mocks both dependencies succeeding, asserting return order is `mysql`, `redis`.
 
-## 11. 实际执行顺序
+## 11. Execution Sequence
 
-1. 确认应用 Pod 所在节点的网络/Tailscale 状态正常；确认路由可达 `10.0.0.247` 和 `100.105.130.0`，或通过集群 Service 访问 Redis。
-2. 执行 `uv venv --python 3.12`、`uv lock` 和 `uv sync --dev`，安装 `pyproject.toml` 依赖。
-3. 从 `.env.example` 复制 `.env`，只在本机填入真实连接信息。
-4. 运行 `uv run python -m scripts.check_phase1`，先修复网络、账号或认证问题，再继续。
-5. 运行 `uv run pytest -q` 与 `uv run ruff check app scripts tests`。
-6. 使用 LiteLLM 的版本对应命令执行配置校验；若版本支持，先运行 `litellm --config config.yaml --port 4000 --detailed_debug` 的启动前检查。
-7. 启动 Proxy：
+1. Verify network/Tailscale status on the node hosting the application Pod; confirm routes to `10.0.0.247` and `100.105.130.0` or Redis in-cluster Service are reachable.
+2. Run `uv venv --python 3.12`, `uv lock`, and `uv sync --dev` to install dependencies from `pyproject.toml`.
+3. Copy `.env` from `.env.example`, populating real connection credentials locally only.
+4. Run `uv run python -m scripts.check_phase1`; resolve any network, account, or authentication issues before proceeding.
+5. Run `uv run pytest -q` and `uv run ruff check app scripts tests`.
+6. Run configuration checks using the command corresponding to the LiteLLM version; if supported, run pre-startup validation with `litellm --config config.yaml --port 4000 --detailed_debug`.
+7. Start the Proxy:
 
    ```bash
    litellm --config config.yaml --port "${LITELLM_PORT:-4000}"
    ```
 
-8. 另开终端运行 `uv run python -m scripts.smoke_proxy --base-url http://127.0.0.1:4000`。
-9. 只在确认供应商额度和模型选择后，显式运行 `uv run python -m scripts.smoke_proxy --send-chat --model gpt-4o-mini` 做一次付费请求验收。
-10. 记录 Proxy 启动日志、健康检查结果和模型列表；日志不得包含 API Key、Redis 密码或 MySQL 密码。
+8. In a separate terminal, run `uv run python -m scripts.smoke_proxy --base-url http://127.0.0.1:4000`.
+9. Only after confirming provider quota and model selection, explicitly run `uv run python -m scripts.smoke_proxy --send-chat --model gpt-4o-mini` for paid acceptance.
+10. Record Proxy startup logs, health check results, and model lists; logs must contain zero API keys, Redis passwords, or MySQL credentials.
 
-## 12. Phase 1 不做的事情
+## 12. Out of Scope for Phase 1
 
-- 不执行 MySQL `CREATE TABLE`；DDL 属于 Phase 2。
-- 不配置 LiteLLM 成本数据库 callback；避免在表结构未确定时产生不可追踪数据。
-- 不创建 FastAPI 监听端口 `8000` 的服务；FastAPI 属于 Phase 3。
-- 不在应用 Pod、节点 Docker 或 OCI VM 重新部署 Redis；只复用现有 K3s Redis。
-- 不用真实故障反复触发 fallback；先做静态配置检查和一次受控演练。
-- 不把真实 Secret 写入 YAML、Python 源码、测试 fixture 或 Git 历史。
+- No MySQL `CREATE TABLE` executions; DDL belongs to Phase 2.
+- No LiteLLM cost database callback configuration; prevents untraceable data before schema finalization.
+- No FastAPI service listening on port `8000`; FastAPI belongs to Phase 3.
+- No re-deploying Redis inside application Pods, node Docker, or OCI VM; reuse existing K3s Redis only.
+- No triggering fallbacks repeatedly with real faults; static configuration checks and a single controlled test suffice.
+- No writing real Secrets to YAML, Python source, test fixtures, or Git history.
 
-## 13. 验收记录模板
+## 13. Acceptance Record Template
 
-在实施时将以下结果保存到本地工作记录，不提交任何敏感值：
+Save the following results to local records during execution without committing sensitive values:
 
 ```text
 Date:

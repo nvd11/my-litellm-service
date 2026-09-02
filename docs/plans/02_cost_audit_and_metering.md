@@ -1,27 +1,27 @@
-# 模块二实施计划：精细化 Token 计量与 USD 开销审计 (Cost Audit & Token Metering)
+# Module 2 Implementation Plan: Granular Token Metering & USD Cost Auditing
 
-> **目标**：实现 API 请求异步持久化落库至 OCI MySQL (`rin-heatwave`)，精准提取 Prompt/Completion Tokens，计算微美元级（USD）消费并记录耗时与状态。
+> **Goal**: Implement asynchronous request persistence to OCI MySQL (`rin-heatwave`), precisely extracting Prompt/Completion tokens, calculating micro-dollar USD spend, and logging latencies and status codes.
 
 ---
 
-## 1. 架构与设计说明
+## 1. Architecture & Design Specification
 
-### 1.1 数据流架构
+### 1.1 Data Flow Architecture
 ```
 [Client Request] --> [LiteLLM Proxy (Port 4000)]
                            |
                            +---> (Async Callback Hook) ---> [OCI MySQL HeatWave: llm_request_logs (10.0.0.247:3306)]
 ```
-1. 客户端发起请求并获得响应。
-2. LiteLLM Proxy 的异步 Success Callback 触发。
-3. 提取请求元数据（`request_id`, `model_requested`, `model_used`, `prompt_tokens`, `completion_tokens`, `cost_usd`, `latency_ms`）。
-4. 异步通过 Tailscale 内网将数据写入 OCI 托管 MySQL 数据库，不阻塞主接口延迟。
+1. The client issues a request and receives the response payload.
+2. LiteLLM Proxy triggers the asynchronous Success Callback.
+3. The hook extracts metadata (`request_id`, `model_requested`, `model_used`, `prompt_tokens`, `completion_tokens`, `cost_usd`, `latency_ms`).
+4. Telemetry is written asynchronously to the managed OCI MySQL database over Tailscale without impacting client-perceived latency.
 
 ---
 
-## 2. 详细实施步骤 (Step-by-Step)
+## 2. Step-by-Step Implementation
 
-### Step 1: 初始化 MySQL DDL (`scripts/init_db.sql`)
+### Step 1: Initialize MySQL Schema (`scripts/init_db.sql`)
 ```sql
 CREATE TABLE IF NOT EXISTS llm_request_logs (
     id VARCHAR(36) PRIMARY KEY,
@@ -41,15 +41,15 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-### Step 2: 配置 LiteLLM MySQL Callback
-在 `config.yaml` 或自定义 Python Hook 中配置数据库连接：
+### Step 2: Configure LiteLLM MySQL Callback
+Configure database connectivity within `config.yaml` or a custom Python hook:
 ```yaml
 general_settings:
-  database_url: "mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@10.0.0.247:3306/${MYSQL_DB}"
+  database_url: "mysql+aiomysql://${MYSQL_USER}:***@10.0.0.247:3306/${MYSQL_DB}"
 ```
 
-### Step 3: FastAPI 开销统计 API 实现 (`/v1/metrics/spend`)
-编写 FastAPI 路由，直连 OCI MySQL 读取花费汇总：
+### Step 3: Implement Spend Metrics API (`/v1/metrics/spend`)
+Author a FastAPI endpoint connecting directly to OCI MySQL to aggregate spending:
 ```python
 # app/routers/metrics.py
 from fastapi import APIRouter, Depends
@@ -76,22 +76,22 @@ async def get_spend_metrics(db: AsyncSession = Depends(get_db)):
 
 ---
 
-## 3. 验收与测试方案 (Verification & Acceptance)
+## 3. Verification & Acceptance Testing
 
-1. **落库准确性验证**：
-   * 向 LiteLLM Proxy 发送 5 次请求。
-   * 查询数据库：
+1. **Persistence Accuracy Verification**:
+   * Dispatch 5 test requests to LiteLLM Proxy.
+   * Query database:
      ```sql
      SELECT request_id, model_used, total_tokens, cost_usd, latency_ms FROM llm_request_logs ORDER BY created_at DESC LIMIT 5;
      ```
-   * 核对 `total_tokens` 是否与 API 返回的 `usage` 字段一致，`cost_usd` 是否大于 0。
-2. **API 开销统计看板验证**：
-   * 调用 `GET http://localhost:8000/v1/metrics/spend`。
-   * 确认返回 JSON 数据结构与汇总金额正确。
+   * Confirm `total_tokens` matches the API response `usage` payload and `cost_usd` is greater than 0.
+2. **Metrics Dashboard API Verification**:
+   * Issue `GET http://localhost:8000/v1/metrics/spend`.
+   * Verify JSON response formatting and aggregated totals.
 
 ---
 
-## 4. 风险控制与红线 (Risk Control)
+## 4. Risk Control & Operational Constraints
 
-* ⚠️ **异步隔离**：数据库写入故障（如 DB 连通超时）严禁导致 LLM API 请求失败，必须使用 `try-except` 包裹日志回调。
-* ⚠️ **数据精度**：金额必须采用 MySQL `DECIMAL(10, 6)` 类型，严禁使用浮点数（`FLOAT`）存储，避免累加浮点精度丢失。
+* ⚠️ **Asynchronous Fault Isolation**: Database write failures (e.g., connection timeouts) must never fail upstream LLM API requests; wrap all logging callbacks in strict `try-except` blocks.
+* ⚠️ **Precision Requirements**: Monetary fields must use MySQL `DECIMAL(10, 6)` rather than floating-point types (`FLOAT`/`DOUBLE`) to prevent accumulated rounding errors.
