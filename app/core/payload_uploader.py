@@ -16,14 +16,20 @@ logger = logging.getLogger(__name__)
 def _to_serializable(obj: Any) -> Any:
     """Recursively convert objects to JSON-serializable structures."""
     if hasattr(obj, "model_dump"):
-        return obj.model_dump()
+        try:
+            return _to_serializable(obj.model_dump())
+        except Exception:
+            pass
     if hasattr(obj, "dict"):
-        return obj.dict()
+        try:
+            return _to_serializable(obj.dict())
+        except Exception:
+            pass
     if isinstance(obj, dict):
-        return {k: _to_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple, set)):
+        return {str(k): _to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set, frozenset)):
         return [_to_serializable(item) for item in obj]
-    if isinstance(obj, (datetime,)):
+    if isinstance(obj, datetime):
         return obj.isoformat()
     if isinstance(obj, (bytes, bytearray)):
         return obj.decode("utf-8", errors="replace")
@@ -32,6 +38,23 @@ def _to_serializable(obj: Any) -> Any:
     if hasattr(obj, "__str__") and not isinstance(obj, (int, float, bool, type(None))):
         return str(obj)
     return obj
+
+
+def _json_default(obj: Any) -> Any:
+    """Fallback serializer for any objects that evade recursive serialization."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.decode("utf-8", errors="replace")
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    if isinstance(obj, Exception):
+        return {"error_type": type(obj).__name__, "message": str(obj)}
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+    return str(obj)
 
 
 def extract_prompt_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -92,8 +115,18 @@ async def async_upload_payload(
         prompt_dict = extract_prompt_payload(kwargs)
         response_dict = extract_response_payload(response_obj)
 
-        prompt_bytes = json.dumps(prompt_dict, ensure_ascii=False, indent=2).encode("utf-8")
-        response_bytes = json.dumps(response_dict, ensure_ascii=False, indent=2).encode("utf-8")
+        prompt_bytes = json.dumps(
+            prompt_dict,
+            ensure_ascii=False,
+            indent=2,
+            default=_json_default,
+        ).encode("utf-8")
+        response_bytes = json.dumps(
+            response_dict,
+            ensure_ascii=False,
+            indent=2,
+            default=_json_default,
+        ).encode("utf-8")
 
         session = aioboto3.Session()
         boto_config = Config(

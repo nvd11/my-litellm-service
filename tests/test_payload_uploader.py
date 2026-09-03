@@ -138,6 +138,34 @@ async def test_async_upload_payload_success(test_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_upload_payload_with_nested_datetime(test_settings: Settings) -> None:
+    """Ensure complex LiteLLM kwargs with nested datetimes serialize cleanly without error."""
+    mock_s3_client = AsyncMock()
+    mock_context = AsyncMock()
+    mock_context.__aenter__.return_value = mock_s3_client
+    mock_context.__aexit__.return_value = None
+
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_context
+
+    with patch("aioboto3.Session", return_value=mock_session):
+        await async_upload_payload(
+            request_id="req-datetime-test",
+            kwargs={
+                "model": "gemini-3.7-flash",
+                "litellm_params": {
+                    "arrival_time": datetime.now(UTC),
+                    "nested_dates": [datetime(2026, 9, 3, 15, 0, 0, tzinfo=UTC)],
+                },
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+            response_obj={"created_at": datetime.now(UTC)},
+            settings=test_settings,
+        )
+        assert mock_s3_client.put_object.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_async_upload_payload_exception_isolated(test_settings: Settings) -> None:
     """Ensure upload exceptions (e.g. timeout / network down) are caught and isolated."""
     mock_session = MagicMock()
