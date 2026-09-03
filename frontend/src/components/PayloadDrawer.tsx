@@ -26,7 +26,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   const [payloadData, setPayloadData] = useState<PayloadData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [expandMessages, setExpandMessages] = useState<boolean>(false);
+  const [expandMessages, setExpandMessages] = useState<boolean>(true);
 
   useEffect(() => {
     if (!log) {
