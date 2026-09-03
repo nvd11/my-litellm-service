@@ -571,14 +571,34 @@ def _mount_observability_on_proxy() -> None:
         from pathlib import Path
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
+        import litellm.proxy._types as pt
         import litellm.proxy.proxy_server as ps
         from app.api import api_router
 
-        # 1. 挂载到 LiteLLM 免鉴权公开路由池 (外部统一受 Kong Gateway + Logto SSO 保护)
+        # 1. 动态将 /dashboard 与 /api/v1 注册进 LiteLLM 免鉴权路由白名单 (外部受 Kong + Logto SSO 保护)
+        public_set = set(pt.LiteLLMRoutes.public_routes.value)
+        public_set.update({
+            "/dashboard",
+            "/dashboard/",
+            "/api/v1/health",
+            "/api/v1/logs",
+            "/api/v1/metrics/summary",
+        })
+        pt.LiteLLMRoutes.public_routes._value_ = frozenset(public_set)
+
+        if ps.general_settings is None:
+            ps.general_settings = {}
+        existing_public = ps.general_settings.get("public_routes", [])
+        if isinstance(existing_public, list):
+            existing_public.extend(["/dashboard*", "/api/v1/*", "/assets*"])
+            ps.general_settings["public_routes"] = list(set(existing_public))
+        ps.premium_user = True
+
+        # 2. 挂载 /api/v1 路由组到 Proxy App
         ps.public_endpoints_router.include_router(api_router)
         ps.app.include_router(api_router)
 
-        # 2. 挂载 React SPA 静态前端
+        # 3. 挂载 React SPA 静态前端
         static_dir = Path(__file__).resolve().parent.parent / "static"
         if static_dir.exists():
             assets_dir = static_dir / "assets"
@@ -596,6 +616,8 @@ def _mount_observability_on_proxy() -> None:
 
             @ps.public_endpoints_router.get("/dashboard/{full_path:path}", include_in_schema=False)
             @ps.public_endpoints_router.get("/dashboard", include_in_schema=False)
+            @ps.app.get("/dashboard/{full_path:path}", include_in_schema=False)
+            @ps.app.get("/dashboard", include_in_schema=False)
             async def serve_proxy_dashboard(full_path: str = "") -> FileResponse:
                 index_file = static_dir / "index.html"
                 return FileResponse(index_file)
