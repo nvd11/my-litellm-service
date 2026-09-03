@@ -49,8 +49,10 @@ def test_extract_prompt_payload() -> None:
 
     result = extract_prompt_payload(kwargs)
     assert result["model"] == "gemini-3.7-flash"
+    assert result["system_prompt"] == "You are Cindy."
+    assert result["user_prompt"] == "Hello!"
     assert len(result["messages"]) == 2
-    assert result["optional_params"]["temperature"] == 0.7
+    assert result["parameters"]["temperature"] == 0.7
     assert result["tools"][0]["function"]["name"] == "test_tool"
 
 
@@ -58,13 +60,14 @@ def test_extract_response_payload() -> None:
     """Test extracting responses from dictionaries, models, and exceptions."""
     # 1. Dict
     res_dict = {"choices": [{"message": {"content": "Hi Boss"}}], "usage": {"total_tokens": 42}}
+    assert extract_response_payload(res_dict)["reply"] == "Hi Boss"
     assert extract_response_payload(res_dict)["usage"]["total_tokens"] == 42
 
     # 2. Mock model_dump object
     mock_model = MagicMock()
-    mock_model.model_dump.return_value = {"content": "model output"}
+    mock_model.model_dump.return_value = {"choices": [{"message": {"content": "model output"}}]}
     del mock_model.dict  # Ensure model_dump is picked
-    assert extract_response_payload(mock_model) == {"content": "model output"}
+    assert extract_response_payload(mock_model)["reply"] == "model output"
 
     # 3. Exception
     exc = ValueError("Simulated upstream error")

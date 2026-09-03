@@ -58,32 +58,96 @@ def _json_default(obj: Any) -> Any:
 
 
 def extract_prompt_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Extract and structure request prompt details from LiteLLM hook kwargs."""
+    """Extract and structure clear, readable request prompt details."""
+    raw_messages = kwargs.get("messages") or []
+    cleaned_messages = _to_serializable(raw_messages)
+
+    system_prompts: list[str] = []
+    user_prompts: list[str] = []
+
+    if isinstance(cleaned_messages, list):
+        for msg in cleaned_messages:
+            if isinstance(msg, dict):
+                role = str(msg.get("role", "")).lower()
+                content = msg.get("content")
+                if content is not None:
+                    text_val = content if isinstance(content, str) else str(content)
+                    if role == "system":
+                        system_prompts.append(text_val)
+                    elif role == "user":
+                        user_prompts.append(text_val)
+
+    system_prompt = "\n\n".join(system_prompts) if system_prompts else None
+    latest_user_prompt = user_prompts[-1] if user_prompts else None
+
+    # 提取调用参数 (temperature, max_tokens, stream 等)
+    opt_params = kwargs.get("optional_params") or {}
+    params = {
+        "temperature": opt_params.get("temperature") or kwargs.get("temperature"),
+        "max_tokens": opt_params.get("max_tokens") or kwargs.get("max_tokens"),
+        "stream": opt_params.get("stream", False),
+        "top_p": opt_params.get("top_p"),
+    }
+    # 过滤 None
+    clean_params = {k: v for k, v in params.items() if v is not None}
+
     return {
-        "model": kwargs.get("model"),
-        "messages": _to_serializable(kwargs.get("messages", [])),
-        "optional_params": _to_serializable(kwargs.get("optional_params", {})),
-        "litellm_params": _to_serializable(kwargs.get("litellm_params", {})),
+        "model": kwargs.get("model") or "unknown",
+        "system_prompt": system_prompt,
+        "user_prompt": latest_user_prompt,
+        "messages": cleaned_messages,
+        "parameters": clean_params,
         "tools": _to_serializable(kwargs.get("tools")),
-        "functions": _to_serializable(kwargs.get("functions")),
     }
 
 
 def extract_response_payload(response_obj: Any) -> dict[str, Any]:
-    """Extract and structure response details from LiteLLM response object or error."""
+    """Extract and structure clean, readable response details from LiteLLM response."""
     if response_obj is None:
-        return {}
+        return {"reply": None, "error": "Response object is None"}
+
     if isinstance(response_obj, Exception):
         return {
+            "reply": None,
             "error": {
                 "type": type(response_obj).__name__,
                 "message": str(response_obj),
-            }
+            },
         }
-    serialized = _to_serializable(response_obj)
-    if isinstance(serialized, dict):
-        return serialized
-    return {"raw_response": str(serialized)}
+
+    raw = _to_serializable(response_obj)
+    if not isinstance(raw, dict):
+        return {"reply": str(raw)}
+
+    # 提取 choices
+    choices = raw.get("choices") or []
+    first_choice = choices[0] if isinstance(choices, list) and choices else {}
+
+    reply_content = None
+    reasoning_content = None
+    tool_calls = None
+    finish_reason = None
+
+    if isinstance(first_choice, dict):
+        finish_reason = first_choice.get("finish_reason")
+        msg = first_choice.get("message")
+        if isinstance(msg, dict):
+            reply_content = msg.get("content")
+            reasoning_content = msg.get("reasoning_content")
+            tool_calls = msg.get("tool_calls")
+        elif first_choice.get("text"):
+            reply_content = first_choice.get("text")
+
+    usage = raw.get("usage")
+
+    return {
+        "model": raw.get("model"),
+        "reply": reply_content,
+        "reasoning_content": reasoning_content,
+        "tool_calls": tool_calls,
+        "finish_reason": finish_reason,
+        "usage": usage,
+    }
 
 
 async def async_upload_payload(
