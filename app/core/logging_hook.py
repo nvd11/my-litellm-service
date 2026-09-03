@@ -568,55 +568,39 @@ custom_logger = DBLoggingLogger()
 # ==============================================================================
 def _mount_observability_on_proxy() -> None:
     try:
-        import os
         from pathlib import Path
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from litellm.proxy.proxy_server import app as proxy_app
+        import litellm.proxy.proxy_server as ps
         from app.api import api_router
 
-        # 1. 注入内部 Master Key 自动鉴权中间件 (为经由 Kong Logto SSO 放行的看板请求自动补齐鉴权头)
-        class InternalDashboardAuthMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                path = request.url.path
-                if path.startswith("/dashboard") or path.startswith("/api/v1") or path.startswith("/assets"):
-                    if "authorization" not in request.headers:
-                        master_key = os.environ.get("LITELLM_MASTER_KEY", "")
-                        if master_key:
-                            headers = dict(request.scope.get("headers", []))
-                            headers[b"authorization"] = f"Bearer {master_key}".encode("utf-8")
-                            request.scope["headers"] = list(headers.items())
-                return await call_next(request)
+        # 1. 挂载到 LiteLLM 免鉴权公开路由池 (外部统一受 Kong Gateway + Logto SSO 保护)
+        ps.public_endpoints_router.include_router(api_router)
+        ps.app.include_router(api_router)
 
-        proxy_app.add_middleware(InternalDashboardAuthMiddleware)
-
-        # 2. 注册 /api/v1 路由组
-        proxy_app.include_router(api_router)
-
-        # 3. 挂载 React SPA 静态前端
+        # 2. 挂载 React SPA 静态前端
         static_dir = Path(__file__).resolve().parent.parent / "static"
         if static_dir.exists():
             assets_dir = static_dir / "assets"
             if assets_dir.exists():
-                proxy_app.mount(
+                ps.app.mount(
                     "/dashboard/assets",
                     StaticFiles(directory=str(assets_dir)),
                     name="dashboard_assets",
                 )
-                proxy_app.mount(
+                ps.app.mount(
                     "/assets",
                     StaticFiles(directory=str(assets_dir)),
                     name="root_assets",
                 )
 
-            @proxy_app.get("/dashboard/{full_path:path}", include_in_schema=False)
-            @proxy_app.get("/dashboard", include_in_schema=False)
+            @ps.public_endpoints_router.get("/dashboard/{full_path:path}", include_in_schema=False)
+            @ps.public_endpoints_router.get("/dashboard", include_in_schema=False)
             async def serve_proxy_dashboard(full_path: str = "") -> FileResponse:
                 index_file = static_dir / "index.html"
                 return FileResponse(index_file)
 
-        logger.info("Successfully mounted Observatory API & Dashboard onto LiteLLM Proxy!")
+        logger.info("Successfully mounted Observatory API & Dashboard onto LiteLLM public routes!")
     except Exception as exc:
         logger.debug("Observability router mounting skipped: %s", exc)
 
