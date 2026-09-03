@@ -1,20 +1,20 @@
 # Phase 6 实施计划：LiteLLM 可观测性看板 (Observatory Dashboard) 与 FastAPI 监控接口技术规格
 
-> **目标**：在当前代码仓库（`my-litellm-service`）中构建一套开箱即用、轻量高效的 **大模型可观测性看板（LiteLLM Observatory Dashboard）**。复用已有的 **FastAPI 服务 (`Service B: Port 8000`)**，对外暴露标准分页与统计接口；前端采用 **现代单页面架构 (Tailwind CSS + Vue 3 ESM + Highlight.js)** 嵌入静态资源；与 **OCI MySQL (`v_llm_request_details`)** 及 **NUC MinIO S3** 深度联动；通过 **ArgoCD GitOps** 与 **Kong Gateway (Logto SSO 零信任保护)** 接入统一域名路由（`https://gw.jppwl.asia/dashboard`），实现大模型调用的实时审计、费用监控与报文深度穿透。
+> **目标**：在当前代码仓库（`my-litellm-service`）中构建一套开箱即用、大厂级现代化质感的 **大模型可观测性看板（LiteLLM Observatory Dashboard）**。复用已有的 **FastAPI 服务 (`Service B: Port 8000`)**，对外暴露标准分页与统计接口；前端采用 **Vite + React 18 + TypeScript + Tailwind CSS + Lucide Icons** 现代工程化架构（目录位于 `frontend/`，构建产物打包至 `app/static/`）；与 **OCI MySQL (`v_llm_request_details`)** 及 **NUC MinIO S3** 深度联动；通过 **ArgoCD GitOps** 与 **Kong Gateway (Logto SSO 零信任保护)** 接入统一域名路由（`https://gw.jppwl.asia/dashboard`），实现大模型调用的实时审计、费用监控与报文深度穿透。
 
 ---
 
 ## 1. 架构定位与设计哲学
 
-### 1.1 为什么自研内嵌轻量看板？
-1. **极致轻量（Zero Fat）**：
-   - 传统 BI（如 Apache Superset / Databricks）常驻内存需 1GB~2GB，依赖 Redis、Celery、Gunicorn 等复杂中间件矩阵；
-   - 自研看板直接运行在现有的 FastAPI 进程中，常驻内存增量 **< 30MB**，首屏秒开，资源开销几乎为零。
+### 1.1 为什么自研 Vite + React 现代化看板？
+1. **极致轻量与零额外运维负担（Zero Infrastructure Fat）**：
+   - 传统 BI（如 Apache Superset / Databricks）常驻内存需 1GB~2GB，依赖 Redis、Celery、Gunicorn 等复杂微服务矩阵；
+   - 本方案前端采用 **Vite + React 静态编译**，生产产物仅为轻量静态 HTML/JS/CSS，由 FastAPI 极速托管，常驻内存增量 **< 30MB**，首屏秒开，完全无额外服务器负载。
 2. **大模型专用交互体验（Tailored for LLM Observability）**：
    - 传统数据库表格无法良好展示多轮对话、长上下文与思维链（Reasoning）；
-   - 自研看板支持 **双栏抽屉（Sliding Drawer）**，一键拆解 `System Prompt`、`User Prompt`、`Model Reply` 与 `Reasoning Tokens`，支持 Markdown 高亮渲染与一键复制。
-3. **单仓库一体化交付（Monorepo Delivery）**：
-   - 前后端代码完全在同一仓库内管理，同一次 Git Commit 即可完成 API 变更与 UI 渲染对齐，单次 CI/CD 自动发布上线。
+   - 采用 React 组件化实现 **双栏抽屉（Sliding Drawer）**，一键结构化拆解 `System Prompt`、`User Prompt`、`Model Reply` 与 `Reasoning Tokens`，支持 Markdown 语法高亮与一键复制。
+3. **单仓库一体化构建与交付（Monorepo Delivery）**：
+   - 前后端代码完全在同一仓库内管理，通过 Dockerfile 多阶段构建（Multi-stage build）一键编译前端并打包进镜像，单次 Git Commit 与 CI/CD 自动发布上线。
 
 ---
 
@@ -34,7 +34,7 @@ flowchart TD
 
     subgraph K3sCluster["K3s 业务集群 (tencent-dp1-cluster)"]
         subgraph FastAPI_Pod["FastAPI Observatory Service (:8000)"]
-            StaticUI["/dashboard (Tailwind + Vue 3 静态单页面)"]
+            StaticUI["/dashboard (Vite + React SPA 静态托管)"]
             LogAPI["/api/v1/logs (分页查询 / 条件过滤)"]
             SummaryAPI["/api/v1/metrics/summary (今日大盘指标)"]
             PayloadProxy["/api/v1/logs/{id}/payload (MinIO S3 报文直读)"]
@@ -168,11 +168,67 @@ flowchart TD
 
 ---
 
-## 4. 前端 UI 看板交互设计 (`app/static/`)
+## 4. 安全与认证架构设计 (流派一：Kong Forward-Auth + Cloudflare 边缘同域聚合)
 
-在 `app/static/index.html` 采用 **Vue 3 (ES Modules) + Tailwind CSS CDN + Lucide Icons + Highlight.js** 组织纯静态 SPA 单文件，零构建、零打包、开箱即用。
+本看板全面采用 **流派一：网关级统一身份代理 (Kong Forward-Auth + Logto Cookie 穿透)**。
 
-### 4.1 UI 界面布局规划
+### 4.1 认证架构与交互时序 (Mermaid)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Boss as 主人 (浏览器 / 移动端)
+    participant CF as Cloudflare Edge (*.jppwl.asia)
+    participant Kong as Kong Gateway (Edge Ingress)
+    participant OAuth2 as OAuth2-Proxy & Logto Cloud
+    participant React as React 前端看板 (/dashboard)
+    participant FastAPI as FastAPI 后端接口 (/api/v1/logs)
+
+    Boss->>CF: 访问 https://gw.jppwl.asia/dashboard
+    CF->>Kong: 转发请求 (Edge SSL 终结)
+    
+    alt 未登录 (无 _oauth2_proxy Cookie)
+        Kong->>OAuth2: 触发 oauth2-forward-auth 校验
+        OAuth2-->>Boss: 302 重定向至 Logto GitHub 登录扫码页
+        Boss->>OAuth2: GitHub 授权完成
+        OAuth2-->>Boss: 下发根域 Cookie (_oauth2_proxy, Domain=.jppwl.asia)
+    end
+
+    Kong->>React: 放行加载 React SPA 前端单页面静态资源
+    
+    Note over React,FastAPI: 前端发起数据请求 (fetch('/api/v1/logs'))
+    React->>Kong: GET /api/v1/logs (浏览器自动携带 .jppwl.asia Cookie)
+    Kong->>OAuth2: 校验 Cookie 有效性
+    OAuth2-->>Kong: 校验通过，注入 Header: X-Auth-Request-User = nvd11
+    Kong->>FastAPI: 转发 API 请求 (携带身份头)
+    FastAPI-->>React: 返回 MySQL 审计日志列表 (JSON)
+```
+
+---
+
+### 4.2 为什么选择流派一？核心架构优势分析
+
+1. **前端代码零鉴权负担（Zero Auth Overhead in React）**：
+   - React 前端不需要引入庞大的 `@logto/react` 或 OIDC SDK；
+   - 不需要管理 Access Token 的本地存储（`localStorage`）、防 XSS 攻击与复杂的静默刷新（`refreshToken`）定时器；
+   - 前端发 API 仅需原生 `fetch('/api/v1/logs')`，浏览器自动携带同域 HttpOnly 安全 Cookie。
+2. **全站单点登录体验 (100% Seamless SSO)**：
+   - Cookie 作用域绑定在 **`.jppwl.asia`** 顶级域；
+   - 只要主人在 DbGate、MinIO 或其他子系统登录过，点进看板直接秒开，**完全无感进入**！
+3. **彻底消除跨域（Zero CORS）与 Cloudflare 边缘同域聚合**：
+   - 即使未来前后端物理拆分到不同容器或平台（如前端在 Vercel、后端在 K3s），通过 **Cloudflare 边缘路由（Origin Rules / Worker）** 将 `/api/*` 与 `/dashboard/*` 聚合在同一个域名（`gw.jppwl.asia`）下；
+   - 浏览器判定为 100% 同源请求，彻底避免 `Access-Control-Allow-Origin` 与 `OPTIONS` 预检性能损耗。
+4. **混合双钥匙鉴权（Hybrid Auth）**：
+   - **浏览器端**：依赖 Kong 注入的 `X-Auth-Request-User: nvd11` 进行身份识别；
+   - **自动化脚本/CLI**：FastAPI 后端额外兼容 `Authorization: Bearer <LITELLM_MASTER_KEY>`，方便自动化运维工具调用。
+
+---
+
+## 5. 前端架构与 UI 看板交互设计 (`frontend/`)
+
+采用 **Vite + React 18 + TypeScript + Tailwind CSS + Lucide Icons + PrismJS / Highlight.js**，目录位于 `frontend/`，构建产物编译输出至 `app/static/`。
+
+### 5.1 UI 界面布局规划
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -192,16 +248,16 @@ flowchart TD
 └─────────────────┴──────────┴──────────────────┴──────────────┴──────────┴──────────────┘
 ```
 
-### 4.2 右侧报文透视抽屉 (Sliding Drawer)
+### 5.2 右侧报文透视抽屉 (Sliding Drawer)
 
-点击任意行后，右侧平滑滑出全屏/半屏抽屉面板：
+点击表格中任意一行，右侧平滑滑出抽屉面板（Drawer）：
 
 - **Tab 1: 格式化高亮视图（默认）**：
-  - 📌 **System Prompt 卡片**（浅紫底色，带一键复制与收起功能）；
+  - 📌 **System Prompt 卡片**（浅紫底色，带一键复制与展开收起）；
   - 💬 **User Prompt 卡片**（浅蓝底色，展示用户最新提问）；
-  - 💡 **Assistant Reply 卡片**（浅绿底色，支持 Markdown 语法高亮）；
+  - 💡 **Assistant Reply 卡片**（浅绿底色，支持 Markdown 实时高亮）；
   - 🧠 **Thinking & Reasoning 折叠栏**（针对思维链模型展示思考过程）；
-  - 📜 **多轮对话上下文折叠列表**（可按时序展开全部历史问答）。
+  - 📜 **多轮对话上下文折叠列表**（按时序展开全部历史问答）。
 - **Tab 2: 原始 JSON 报文**：
   - 左右并排高亮展示原始 `prompt.json` 与 `response.json`，提供复制 Raw JSON 功能。
 - **Tab 3: 元数据与计费明细**：
@@ -209,13 +265,13 @@ flowchart TD
 
 ---
 
-## 5. 项目代码结构变更规划
+## 6. 项目代码结构变更规划
 
 ```text
 my-litellm-service/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                  # 🌟 FastAPI 主入口 (托管路由与静态文件)
+│   ├── main.py                  # 🌟 FastAPI 主入口 (托管 API 路由与静态 SPA)
 │   ├── api/                     # 🌟 新增 API 路由层
 │   │   ├── __init__.py
 │   │   ├── logs.py              # /api/v1/logs 审计分页与过滤
@@ -228,25 +284,96 @@ my-litellm-service/
 │   ├── db/
 │   │   ├── engine.py
 │   │   └── tables.py
-│   └── static/                  # 🌟 新增前端静态资源
-│       ├── index.html           # 现代单页面看板 SPA (Vue 3 + Tailwind)
-│       └── favicon.ico
+│   └── static/                  # 🌟 前端构建产物目录 (由 Vite build 产出)
+│       ├── index.html
+│       └── assets/
+├── frontend/                    # 🌟 新增 Vite + React 前端工程
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.js
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── components/          # MetricCards, LogTable, PayloadDrawer, JsonViewer
+│       └── types/
 ├── tests/
 │   ├── test_api_logs.py         # 🌟 接口单测与覆盖
 │   └── test_payload_uploader.py
-├── scripts/
-│   └── create_views.sql
+├── Dockerfile                   # 🌟 多阶段构建 (Node build -> Python 运行)
 └── docs/plans/
     └── phase_6_observability_dashboard_implementation_plan.md
 ```
 
 ---
 
-## 6. 六大实施里程碑与步骤 (Step-by-Step)
+## 7. 多阶段 Dockerfile 构建设计
+
+通过 Docker 多阶段构建，在镜像打包时完成 React 前端编译，最终镜像中不残留任何 Node.js 垃圾：
+
+```dockerfile
+# ============================================================
+# Stage 1: Build Frontend (Vite + React SPA)
+# ============================================================
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build # 产出 /app/frontend/dist
+
+# ============================================================
+# Stage 2: Runtime (Python 3.12 LiteLLM & FastAPI)
+# ============================================================
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app" \
+    PATH="/app/.venv/bin:$PATH" \
+    PRISMA_HOME_DIR="/tmp/prisma-cache" \
+    PRISMA_USE_GLOBAL_NODE="true"
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    openssl \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml uv.lock README.md ./
+RUN pip install --no-cache-dir uv \
+    && uv sync --frozen --no-dev --no-install-project \
+    && mkdir -p /tmp/prisma-cache \
+    && PRISMA_HOME_DIR=/tmp/prisma-cache uv run prisma generate --schema=/app/.venv/lib/python3.12/site-packages/litellm/proxy/schema.prisma \
+    && chmod -R 777 /tmp/prisma-cache \
+    && rm -rf /root/.cache
+
+COPY config.yaml ./config.yaml
+COPY app ./app
+
+# 将 Stage 1 编译好的 React 静态资源放入 app/static
+COPY --from=frontend-builder /app/frontend/dist ./app/static
+
+USER 65532:65532
+EXPOSE 4000 8000
+
+ENTRYPOINT ["litellm"]
+CMD ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
+```
+
+---
+
+## 8. 六大实施里程碑与步骤 (Step-by-Step)
 
 ### 【Milestone 1】FastAPI 核心应用骨架与静态托管 (`app/main.py`)
 - 创建 FastAPI 实例，配置 CORS 跨域放行；
-- 挂载静态文件目录 `app/static` 至路由 `/dashboard`；
+- 挂载静态文件目录 `app/static` 至根路由或 `/dashboard`；
 - 配置健康检查路由 `/health`。
 
 ### 【Milestone 2】MySQL 审计日志与汇总 API 开发 (`app/api/logs.py` & `metrics.py`)
@@ -255,17 +382,17 @@ my-litellm-service/
 
 ### 【Milestone 3】内网 S3 Payload 报文代理读取 (`app/api/payload.py`)
 - 使用 `aioboto3`，通过 `minio.minio.svc.cluster.local:9000` 直接异步拉取指定 `request_id` 的 `prompt.json` 与 `response.json`；
-- 增加本地缓存与容错处理，未落盘的报文返回优雅友好提示。
+- 增加本地容错处理，未落盘的报文返回优雅友好提示。
 
-### 【Milestone 4】前端现代单页面看板开发 (`app/static/index.html`)
-- 基于 Vue 3 Composition API 构建响应式状态；
-- 集成 Tailwind CSS 现代化配色（深色/浅色卡片式设计）；
-- 实现自动刷新轮询（5s / 10s 开关）；
-- 实现右侧平滑抽屉式查看器，集成 Highlight.js 实现代码与 JSON 高亮。
+### 【Milestone 4】Vite + React 前端工程初始化与核心组件开发 (`frontend/`)
+- 初始化 `frontend/` 工程（React 18 + TypeScript + Tailwind CSS）；
+- 开发指标概览卡片（`SummaryCards.tsx`）；
+- 开发审计数据流表格（`LogsTable.tsx`，带状态徽章、筛选与自动轮询）；
+- 开发右侧抽屉报文透视面板（`PayloadDrawer.tsx`，带 Markdown 渲染与 JSON 语法高亮）。
 
-### 【Milestone 5】全链路接口测试与自动化验证
-- 编写 `tests/test_api_logs.py`，模拟分页、筛选、空数据与异常条件；
-- 确保测试套件全部 100% 绿灯。
+### 【Milestone 5】全链路接口单测与构建验证
+- 编写 `tests/test_api_logs.py`，覆盖分页、筛选与汇总接口；
+- 本地执行 `npm run build` 并验证 FastAPI 静态托管访问无误。
 
 ### 【Milestone 6】ArgoCD GitOps 发布与网关 SSO 路由联调
 - 在 `my-argocd-manifests` 中配置 Kong HTTPRoute：
@@ -275,9 +402,10 @@ my-litellm-service/
 
 ---
 
-## 7. 方案核心收益总结
+## 9. 方案核心收益总结
 
-1. **极致开销**：单容器架构，FastAPI 内存常驻仅 ~30MB，彻底告别 Superset 的沉重资源负担；
-2. **直观可观测**：结构化指标秒级大盘聚合 + 长文本多轮对话右侧抽屉一键透视；
-3. **零信任安全**：外网访问全程受 Cloudflare SSL + Kong Gateway + Logto GitHub SSO 严格保护；
-4. **单仓库闭环**：前后端统一代码库、统一自动化 CI/CD 与 GitOps 发布流程。
+1. **大厂级现代化质感**：基于 Vite + React + Tailwind 构建，具备媲美 LangSmith / OpenAI Dashboard 的专业交互体验；
+2. **极致开销**：单容器多阶段构建，生产环境纯静态托管，FastAPI 内存常驻增量仅 ~30MB；
+3. **直观可观测**：结构化指标秒级大盘聚合 + 长文本多轮对话右侧抽屉一键透视；
+4. **零信任安全**：外网访问全程受 Cloudflare SSL + Kong Gateway + Logto GitHub SSO 严格保护（流派一）；
+5. **单仓库闭环**：前后端统一代码库、统一自动化 CI/CD 与 GitOps 发布流程。
