@@ -39,6 +39,38 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
+CREATE_VIEW_SQL = """
+CREATE OR REPLACE VIEW v_llm_request_details AS
+SELECT 
+    l.id,
+    l.request_id,
+    l.api_key_alias,
+    l.model_requested,
+    l.model_used,
+    l.provider,
+    l.provider_key_alias,
+    l.prompt_tokens,
+    l.completion_tokens,
+    l.total_tokens,
+    l.cost_usd,
+    l.cost_cny,
+    l.fx_rate,
+    l.latency_ms,
+    l.status_code,
+    l.created_at,
+    CONCAT(
+        'https://minio.jppwl.asia/litellm-payloads/',
+        DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
+        l.request_id, '/prompt.json'
+    ) AS prompt_url,
+    CONCAT(
+        'https://minio.jppwl.asia/litellm-payloads/',
+        DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
+        l.request_id, '/response.json'
+    ) AS response_url
+FROM llm_request_logs l;
+"""
+
 
 async def init_database() -> bool:
     settings = get_settings()
@@ -77,6 +109,9 @@ async def init_database() -> bool:
         cursor = await conn.cursor()
         print("Creating table 'llm_request_logs' if not exists...")
         await cursor.execute(CREATE_TABLE_SQL)
+
+        print("Creating view 'v_llm_request_details' if not exists...")
+        await cursor.execute(CREATE_VIEW_SQL)
 
         await cursor.execute("SHOW TABLES LIKE 'llm_request_logs';")
         tables = await cursor.fetchall()

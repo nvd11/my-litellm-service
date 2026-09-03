@@ -106,11 +106,7 @@ async def send_streaming_chat(
                     req_id = chunk_json["id"]
                 if not actual_model and "model" in chunk_json:
                     actual_model = chunk_json["model"]
-                delta = (
-                    chunk_json.get("choices", [{}])[0]
-                    .get("delta", {})
-                    .get("content")
-                )
+                delta = chunk_json.get("choices", [{}])[0].get("delta", {}).get("content")
                 if delta:
                     chunks.append(str(delta))
             except Exception:

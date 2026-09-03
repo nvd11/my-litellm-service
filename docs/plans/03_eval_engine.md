@@ -42,6 +42,7 @@ import json
 import jsonschema
 import difflib
 
+
 def evaluate_option_a(response_text: str, eval_type: str, rule_config: dict) -> float:
     """Option A: Deterministic assertion evaluation"""
     if eval_type == "json_schema":
@@ -56,6 +57,7 @@ def evaluate_option_a(response_text: str, eval_type: str, rule_config: dict) -> 
         matched = sum(1 for kw in keywords if kw in response_text)
         return (matched / len(keywords)) * 100.0 if keywords else 0.0
     return 0.0
+
 
 def evaluate_option_b(response_text: str, eval_type: str, golden_output: str) -> float:
     """Option B: Golden dataset matching"""
@@ -76,17 +78,20 @@ import time, asyncio, httpx
 
 router = APIRouter(prefix="/v1/eval", tags=["Evaluation"])
 
+
 @router.post("/run")
 async def run_evaluation(eval_payload: dict):
     eval_run_id = f"eval_{int(time.time())}"
     prompts = eval_payload.get("prompts", [])
     models = eval_payload.get("models", ["gpt-4o", "gemini-1.5-pro"])
-    
+
     results = []
-    async with httpx.AsyncClient(base_url="http://litellm-proxy.llm-system.svc.cluster.local:4000") as client:
+    async with httpx.AsyncClient(
+        base_url="http://litellm-proxy.llm-system.svc.cluster.local:4000"
+    ) as client:
         # Dispatch concurrent evaluation requests across candidate models...
         pass
-        
+
     return {"eval_run_id": eval_run_id, "results": results}
 ```
 

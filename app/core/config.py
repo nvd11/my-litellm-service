@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     fastapi_port: int = 8000
     connect_timeout_seconds: float = 5.0
 
+    # === Payload Offloading (S3 / MinIO) Settings ===
+    enable_payload_offload: bool = True
+    payload_s3_endpoint: str = "http://minio.minio.svc.cluster.local:9000"
+    payload_s3_access_key: str = "litellm_admin"
+    payload_s3_secret_key: SecretStr = SecretStr("CHANGE_ME")
+    payload_bucket_name: str = "litellm-payloads"
+    payload_public_base_url: str = "https://payloads.jppwl.asia/litellm-payloads"
+    payload_upload_timeout_seconds: float = 2.0
+
     @field_validator(
         "mysql_port",
         "redis_port",
@@ -90,5 +99,8 @@ def redacted_summary(settings: Settings) -> dict[str, object]:
         "default_usd_to_cny_rate": settings.default_usd_to_cny_rate,
         "litellm_port": settings.litellm_port,
         "fastapi_port": settings.fastapi_port,
+        "enable_payload_offload": settings.enable_payload_offload,
+        "payload_s3_endpoint": settings.payload_s3_endpoint,
+        "payload_bucket_name": settings.payload_bucket_name,
         "secrets": "***",
     }

@@ -21,6 +21,7 @@
    绝对不向调用方客户端抛出异常，保障 100% SLA。
 """
 
+import asyncio
 import datetime
 import logging
 import uuid
@@ -31,6 +32,7 @@ from sqlalchemy import insert
 
 from app.core.config import Settings, get_settings
 from app.core.fx_rate import get_usd_to_cny_rate
+from app.core.payload_uploader import async_upload_payload
 from app.db import get_async_engine, llm_request_logs
 
 # 日志记录器
@@ -82,62 +84,78 @@ def _extract_api_key_alias(kwargs: dict[str, Any]) -> str:
     if isinstance(std_obj, dict):
         std_meta = std_obj.get("metadata")
         if isinstance(std_meta, dict):
-            candidates.extend([
-                std_meta.get("user_api_key_alias"),
-                std_meta.get("key_alias"),
-                std_meta.get("user_api_key_user_id"),
-            ])
-        candidates.extend([
-            std_obj.get("user_api_key_alias"),
-            std_obj.get("key_alias"),
-        ])
+            candidates.extend(
+                [
+                    std_meta.get("user_api_key_alias"),
+                    std_meta.get("key_alias"),
+                    std_meta.get("user_api_key_user_id"),
+                ]
+            )
+        candidates.extend(
+            [
+                std_obj.get("user_api_key_alias"),
+                std_obj.get("key_alias"),
+            ]
+        )
 
     # 2. litellm_params (路由与请求参数)
     litellm_params = kwargs.get("litellm_params")
     if isinstance(litellm_params, dict):
         lp_meta = litellm_params.get("metadata")
         if isinstance(lp_meta, dict):
-            candidates.extend([
-                lp_meta.get("user_api_key_alias"),
-                lp_meta.get("key_alias"),
-                lp_meta.get("user_api_key_user_id"),
-            ])
-        candidates.extend([
-            litellm_params.get("user_api_key_alias"),
-            litellm_params.get("key_alias"),
-            litellm_params.get("api_key_alias"),
-        ])
+            candidates.extend(
+                [
+                    lp_meta.get("user_api_key_alias"),
+                    lp_meta.get("key_alias"),
+                    lp_meta.get("user_api_key_user_id"),
+                ]
+            )
+        candidates.extend(
+            [
+                litellm_params.get("user_api_key_alias"),
+                litellm_params.get("key_alias"),
+                litellm_params.get("api_key_alias"),
+            ]
+        )
 
     # 3. 顶层 metadata 与各类元数据字典
     for meta_key in ("metadata", "litellm_metadata", "user_api_key_metadata"):
         meta_dict = kwargs.get(meta_key)
         if isinstance(meta_dict, dict):
-            candidates.extend([
-                meta_dict.get("user_api_key_alias"),
-                meta_dict.get("key_alias"),
-                meta_dict.get("user_api_key_user_id"),
-            ])
+            candidates.extend(
+                [
+                    meta_dict.get("user_api_key_alias"),
+                    meta_dict.get("key_alias"),
+                    meta_dict.get("user_api_key_user_id"),
+                ]
+            )
 
     # 4. user_api_key_dict 对象或字典
     key_dict = kwargs.get("user_api_key_dict")
     if isinstance(key_dict, dict):
-        candidates.extend([
-            key_dict.get("key_alias"),
-            key_dict.get("user_id"),
-        ])
+        candidates.extend(
+            [
+                key_dict.get("key_alias"),
+                key_dict.get("user_id"),
+            ]
+        )
     elif key_dict is not None:
-        candidates.extend([
-            getattr(key_dict, "key_alias", None),
-            getattr(key_dict, "user_id", None),
-        ])
+        candidates.extend(
+            [
+                getattr(key_dict, "key_alias", None),
+                getattr(key_dict, "user_id", None),
+            ]
+        )
 
     # 5. 顶层直取
-    candidates.extend([
-        kwargs.get("user_api_key_alias"),
-        kwargs.get("key_alias"),
-        kwargs.get("api_key_alias"),
-        kwargs.get("user_api_key_user_id"),
-    ])
+    candidates.extend(
+        [
+            kwargs.get("user_api_key_alias"),
+            kwargs.get("key_alias"),
+            kwargs.get("api_key_alias"),
+            kwargs.get("user_api_key_user_id"),
+        ]
+    )
 
     for item in candidates:
         if item is not None:
@@ -192,56 +210,74 @@ def _extract_provider_info(
     if isinstance(litellm_params, dict):
         lp_meta = litellm_params.get("metadata")
         if isinstance(lp_meta, dict):
-            provider_candidates.extend([
-                lp_meta.get("provider"),
-                lp_meta.get("upstream_provider"),
-            ])
-            key_alias_candidates.extend([
-                lp_meta.get("provider_key_alias"),
-                lp_meta.get("upstream_key_alias"),
-            ])
-        provider_candidates.extend([
-            litellm_params.get("provider"),
-            litellm_params.get("custom_llm_provider"),
-        ])
+            provider_candidates.extend(
+                [
+                    lp_meta.get("provider"),
+                    lp_meta.get("upstream_provider"),
+                ]
+            )
+            key_alias_candidates.extend(
+                [
+                    lp_meta.get("provider_key_alias"),
+                    lp_meta.get("upstream_key_alias"),
+                ]
+            )
+        provider_candidates.extend(
+            [
+                litellm_params.get("provider"),
+                litellm_params.get("custom_llm_provider"),
+            ]
+        )
 
     # 2. standard_logging_object
     std_obj = kwargs.get("standard_logging_object")
     if isinstance(std_obj, dict):
         std_meta = std_obj.get("metadata")
         if isinstance(std_meta, dict):
-            provider_candidates.extend([
-                std_meta.get("provider"),
-                std_meta.get("upstream_provider"),
-            ])
-            key_alias_candidates.extend([
-                std_meta.get("provider_key_alias"),
-                std_meta.get("upstream_key_alias"),
-            ])
+            provider_candidates.extend(
+                [
+                    std_meta.get("provider"),
+                    std_meta.get("upstream_provider"),
+                ]
+            )
+            key_alias_candidates.extend(
+                [
+                    std_meta.get("provider_key_alias"),
+                    std_meta.get("upstream_key_alias"),
+                ]
+            )
         provider_candidates.append(std_obj.get("custom_llm_provider"))
 
     # 3. 顶层 metadata 与 litellm_metadata
     for meta_key in ("metadata", "litellm_metadata", "user_api_key_metadata"):
         meta_dict = kwargs.get(meta_key)
         if isinstance(meta_dict, dict):
-            provider_candidates.extend([
-                meta_dict.get("provider"),
-                meta_dict.get("upstream_provider"),
-            ])
-            key_alias_candidates.extend([
-                meta_dict.get("provider_key_alias"),
-                meta_dict.get("upstream_key_alias"),
-            ])
+            provider_candidates.extend(
+                [
+                    meta_dict.get("provider"),
+                    meta_dict.get("upstream_provider"),
+                ]
+            )
+            key_alias_candidates.extend(
+                [
+                    meta_dict.get("provider_key_alias"),
+                    meta_dict.get("upstream_key_alias"),
+                ]
+            )
 
     # 4. 顶层直接字段
-    provider_candidates.extend([
-        kwargs.get("provider"),
-        kwargs.get("custom_llm_provider"),
-    ])
-    key_alias_candidates.extend([
-        kwargs.get("provider_key_alias"),
-        kwargs.get("upstream_key_alias"),
-    ])
+    provider_candidates.extend(
+        [
+            kwargs.get("provider"),
+            kwargs.get("custom_llm_provider"),
+        ]
+    )
+    key_alias_candidates.extend(
+        [
+            kwargs.get("provider_key_alias"),
+            kwargs.get("upstream_key_alias"),
+        ]
+    )
 
     # 提取第一有效 provider
     provider = "unknown"
@@ -324,9 +360,7 @@ def _extract_tokens(response_obj: Any) -> tuple[int, int, int]:
     else:
         prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
         completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-        total_tokens = int(
-            getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens)
-        )
+        total_tokens = int(getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens))
 
     return prompt_tokens, completion_tokens, total_tokens
 
@@ -389,14 +423,22 @@ class DBLoggingLogger(CustomLogger):
             api_key_alias = _extract_api_key_alias(kwargs)
             model_requested, model_used = _extract_model_names(kwargs, response_obj)
             provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
-            provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
             prompt_tokens, completion_tokens, total_tokens = _extract_tokens(response_obj)
+
+            # 并发派发非阻塞 S3 Payload 异步落库任务
+            asyncio.create_task(
+                async_upload_payload(
+                    request_id=request_id,
+                    kwargs=kwargs,
+                    response_obj=response_obj,
+                    start_time=start_time if isinstance(start_time, datetime.datetime) else None,
+                    settings=settings,
+                )
+            )
 
             # 提取美金成本 (LiteLLM 会在 kwargs 或 response 中注入 response_cost)
             raw_cost_usd = (
-                kwargs.get("response_cost")
-                or getattr(response_obj, "response_cost", 0.0)
-                or 0.0
+                kwargs.get("response_cost") or getattr(response_obj, "response_cost", 0.0) or 0.0
             )
             cost_usd = round(float(raw_cost_usd), 6)
 
@@ -463,6 +505,17 @@ class DBLoggingLogger(CustomLogger):
             api_key_alias = _extract_api_key_alias(kwargs)
             model_requested, model_used = _extract_model_names(kwargs, response_obj)
             provider, provider_key_alias = _extract_provider_info(kwargs, response_obj)
+
+            # 并发派发非阻塞 S3 Payload 异步落库任务 (记录错误上下文)
+            asyncio.create_task(
+                async_upload_payload(
+                    request_id=request_id,
+                    kwargs=kwargs,
+                    response_obj=response_obj,
+                    start_time=start_time if isinstance(start_time, datetime.datetime) else None,
+                    settings=settings,
+                )
+            )
 
             # 失败请求 Token 与费用归零
             prompt_tokens, completion_tokens, total_tokens = 0, 0, 0

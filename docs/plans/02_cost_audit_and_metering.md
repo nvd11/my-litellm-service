@@ -58,6 +58,7 @@ from sqlalchemy import text
 
 router = APIRouter(prefix="/v1/metrics", tags=["Metrics"])
 
+
 @router.get("/spend")
 async def get_spend_metrics(db: AsyncSession = Depends(get_db)):
     query = text("""

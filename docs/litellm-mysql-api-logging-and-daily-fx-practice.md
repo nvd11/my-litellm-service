@@ -105,8 +105,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 engine = create_async_engine(
     mysql_async_url,
-    pool_recycle=300,   # 1. Proactively recycle connections every 5 minutes before firewalls drop them
-    pool_pre_ping=True, # 2. Issue lightweight ping probe before checkout to discard dead connections
+    pool_recycle=300,  # 1. Proactively recycle connections every 5 minutes before firewalls drop them
+    pool_pre_ping=True,  # 2. Issue lightweight ping probe before checkout to discard dead connections
     pool_size=10,
     max_overflow=20,
     connect_args={"connect_timeout": 5.0},
@@ -144,6 +144,7 @@ FX_CACHE_TTL_SECONDS = 86400  # 24-hour refresh cycle
 
 _l1_rate: float | None = None
 _l1_timestamp: float = 0.0
+
 
 async def get_usd_to_cny_rate(settings: Settings | None = None) -> float:
     global _l1_rate, _l1_timestamp
@@ -199,6 +200,7 @@ from sqlalchemy import insert
 from app.db import get_async_engine, llm_request_logs
 from app.core.fx_rate import get_usd_to_cny_rate
 
+
 class DBLoggingLogger(CustomLogger):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__()
@@ -215,7 +217,9 @@ class DBLoggingLogger(CustomLogger):
             prompt_tokens, completion_tokens, total_tokens = _extract_tokens(response_obj)
 
             # Extract USD cost and compute CNY
-            raw_cost_usd = kwargs.get("response_cost") or getattr(response_obj, "response_cost", 0.0) or 0.0
+            raw_cost_usd = (
+                kwargs.get("response_cost") or getattr(response_obj, "response_cost", 0.0) or 0.0
+            )
             cost_usd = round(float(raw_cost_usd), 6)
             fx_rate = await get_usd_to_cny_rate(settings)
             cost_cny = round(cost_usd * fx_rate, 6)
@@ -247,6 +251,7 @@ class DBLoggingLogger(CustomLogger):
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time) -> None:
         # Failed requests (429, 500, timeout) are logged with 0 tokens/spend, actual status code, and latency
         ...
+
 
 # Default instance imported by LiteLLM
 custom_logger = DBLoggingLogger()

@@ -140,37 +140,24 @@ def test_extract_api_key_alias():
 
     # 2. standard_logging_object (LiteLLM 官方标准日志结构)
     assert (
-        _extract_api_key_alias({
-            "standard_logging_object": {
-                "metadata": {"user_api_key_alias": "claire-nixos"}
-            }
-        })
+        _extract_api_key_alias(
+            {"standard_logging_object": {"metadata": {"user_api_key_alias": "claire-nixos"}}}
+        )
         == "claire-nixos"
     )
     assert (
-        _extract_api_key_alias({
-            "standard_logging_object": {
-                "metadata": {"key_alias": "yui-radxa"}
-            }
-        })
+        _extract_api_key_alias(
+            {"standard_logging_object": {"metadata": {"key_alias": "yui-radxa"}}}
+        )
         == "yui-radxa"
     )
 
     # 3. litellm_params 嵌套
     assert (
-        _extract_api_key_alias({
-            "litellm_params": {
-                "metadata": {"user_api_key_alias": "hebe-arm"}
-            }
-        })
+        _extract_api_key_alias({"litellm_params": {"metadata": {"user_api_key_alias": "hebe-arm"}}})
         == "hebe-arm"
     )
-    assert (
-        _extract_api_key_alias({
-            "litellm_params": {"key_alias": "celia-pc"}
-        })
-        == "celia-pc"
-    )
+    assert _extract_api_key_alias({"litellm_params": {"key_alias": "celia-pc"}}) == "celia-pc"
 
     # 4. user_api_key_dict 结构
     assert _extract_api_key_alias({"user_api_key_dict": {"key_alias": "moon"}}) == "moon"
