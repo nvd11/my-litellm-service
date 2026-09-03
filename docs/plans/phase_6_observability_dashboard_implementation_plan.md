@@ -369,7 +369,54 @@ CMD ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
 
 ---
 
-## 8. 六大实施里程碑与步骤 (Step-by-Step)
+## 8. 单一 ArgoCD 应用极简 GitOps 部署架构 (Single ArgoCD Application Pattern)
+
+### 8.1 为什么前端不需要独立的 ArgoCD App？
+1. **一体化镜像交付（Monorepo Multi-Stage Build）**：
+   - 在同一个 `Dockerfile` 中，阶段 1 由 Node 20 编译 React SPA 产出静态 `dist/`，阶段 2 将其复制到 Python 运行时的 `app/static/` 中；
+   - 由现有的 **FastAPI 服务** 在统一进程中同时托管静态页面与数据 API。
+2. **前后端版本原子性对齐（Zero Version Mismatch）**：
+   - 彻底避免传统微服务中“后端发布了新字段、前端还在旧缓存中导致白屏/报错”的经典时序陷阱；
+   - 镜像 Digest 滚动更新的瞬间，前后端代码毫秒级同步原子生效。
+3. **极简 K8s 资源清单管理**：
+   - 无需新建 `frontend-deployment.yaml`、`frontend-service.yaml` 等冗余清单，现有的单一应用 `litellm-svc` 即可承载全部负载。
+
+---
+
+### 8.2 全链路自动化发布时序 (Mermaid)
+
+```mermaid
+flowchart LR
+    GitPush["1. Git Commit & Push<br/>(React 源码 + FastAPI)"] --> GHA["2. GitHub Actions CI/CD<br/>- npm run build (React)<br/>- 编译 Multi-Arch 镜像<br/>- 推送 GHCR"]
+    GHA --> AutoDigest["3. 自动更新 GitOps 仓库<br/>(my-argocd-manifests)"]
+    AutoDigest --> ArgoCD["4. ArgoCD 自动检测并同步<br/>(单一应用: litellm-svc)"]
+    ArgoCD --> K3s["5. K3s Pod 零中断滚动更新<br/>(前后端毫秒级原子上线)"]
+```
+
+---
+
+### 8.3 网关路由规则配置 (`my-argocd-manifests`)
+
+在 `my-argocd-manifests/argocd-apps/litellm-svc-app.yaml` 的 Kong HTTPRoute 规则中，将 `/dashboard` 与 `/api/v1` 路由追加到 Logto SSO 保护列表：
+
+```yaml
+# 在 litellm-svc-app.yaml 的 extraRoutes 中追加:
+dashboard-route:
+  parentGateway: kong-main-gateway
+  parentGatewayNamespace: default
+  annotations:
+    konghq.com/plugins: oauth2-forward-auth # 挂载 Logto GitHub SSO 拦截
+  rules:
+    - matches:
+        - path: /dashboard
+          pathType: PathPrefix
+        - path: /api/v1
+          pathType: PathPrefix
+```
+
+---
+
+## 9. 六大实施里程碑与步骤 (Step-by-Step)
 
 ### 【Milestone 1】FastAPI 核心应用骨架与静态托管 (`app/main.py`)
 - 创建 FastAPI 实例，配置 CORS 跨域放行；
@@ -402,7 +449,7 @@ CMD ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]
 
 ---
 
-## 9. 方案核心收益总结
+## 10. 方案核心收益总结
 
 1. **大厂级现代化质感**：基于 Vite + React + Tailwind 构建，具备媲美 LangSmith / OpenAI Dashboard 的专业交互体验；
 2. **极致开销**：单容器多阶段构建，生产环境纯静态托管，FastAPI 内存常驻增量仅 ~30MB；

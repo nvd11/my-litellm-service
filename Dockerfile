@@ -1,3 +1,18 @@
+# ============================================================
+# Stage 1: Build Frontend (Vite + React SPA)
+# ============================================================
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ============================================================
+# Stage 2: Runtime (Python 3.12 LiteLLM & FastAPI)
+# ============================================================
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -29,10 +44,11 @@ RUN pip install --no-cache-dir uv \
 
 COPY config.yaml ./config.yaml
 COPY app ./app
+COPY --from=frontend-builder /app/app/static ./app/static
 
 USER 65532:65532
 
-EXPOSE 4000
+EXPOSE 4000 8000
 
 ENTRYPOINT ["litellm"]
 CMD ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000"]

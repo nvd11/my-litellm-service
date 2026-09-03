@@ -371,12 +371,14 @@ def extract_prompt_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
 
     opt_params = kwargs.get("optional_params") or {}
     clean_params = {
-        k: v for k, v in {
+        k: v
+        for k, v in {
             "temperature": opt_params.get("temperature") or kwargs.get("temperature"),
             "max_tokens": opt_params.get("max_tokens") or kwargs.get("max_tokens"),
             "stream": opt_params.get("stream", False),
             "top_p": opt_params.get("top_p"),
-        }.items() if v is not None
+        }.items()
+        if v is not None
     }
 
     return {

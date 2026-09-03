@@ -561,3 +561,47 @@ class DBLoggingLogger(CustomLogger):
 # ==============================================================================
 # LiteLLM 在 config.yaml 中配置 `callbacks` 时自动加载此单例
 custom_logger = DBLoggingLogger()
+
+
+# ==============================================================================
+# 自动挂载 Observatory API 与 React 看板到 LiteLLM Proxy FastAPI 实例
+# ==============================================================================
+def _mount_observability_on_proxy() -> None:
+    try:
+        from pathlib import Path
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
+        from litellm.proxy.proxy_server import app as proxy_app
+        from app.api import api_router
+
+        # 1. 注册 /api/v1 路由组
+        proxy_app.include_router(api_router)
+
+        # 2. 挂载 React SPA 静态前端
+        static_dir = Path(__file__).resolve().parent.parent / "static"
+        if static_dir.exists():
+            assets_dir = static_dir / "assets"
+            if assets_dir.exists():
+                proxy_app.mount(
+                    "/dashboard/assets",
+                    StaticFiles(directory=str(assets_dir)),
+                    name="dashboard_assets",
+                )
+                proxy_app.mount(
+                    "/assets",
+                    StaticFiles(directory=str(assets_dir)),
+                    name="root_assets",
+                )
+
+            @proxy_app.get("/dashboard/{full_path:path}", include_in_schema=False)
+            @proxy_app.get("/dashboard", include_in_schema=False)
+            async def serve_proxy_dashboard(full_path: str = "") -> FileResponse:
+                index_file = static_dir / "index.html"
+                return FileResponse(index_file)
+
+        logger.info("Successfully mounted Observatory API & Dashboard onto LiteLLM Proxy!")
+    except Exception as exc:
+        logger.debug("Observability router mounting skipped: %s", exc)
+
+
+_mount_observability_on_proxy()

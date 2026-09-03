@@ -44,6 +44,7 @@ LiteLLM 的 CustomLogger Hook 传递的 `kwargs` 字典包含了极深的多层�
 ```python
 # app/core/payload_uploader.py
 
+
 def _to_serializable(obj: Any) -> Any:
     """递归转换不可序列化结构"""
     if hasattr(obj, "model_dump"):

@@ -1,0 +1,153 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { Navbar } from "./components/Navbar";
+import { MetricCards } from "./components/MetricCards";
+import { LogsTable } from "./components/LogsTable";
+import { PayloadDrawer } from "./components/PayloadDrawer";
+import { LogItem, PaginatedLogsResponse, SummaryMetrics } from "./types";
+
+export const App: React.FC = () => {
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    return new Date().toISOString().split("T")[0];
+  });
+  const [autoRefresh, setAutoRefresh] = useState<number>(15);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // Summary Metrics State
+  const [metrics, setMetrics] = useState<SummaryMetrics | null>(null);
+
+  // Logs Table State
+  const [logsData, setLogsData] = useState<PaginatedLogsResponse | null>(null);
+  const [page, setPage] = useState<number>(1);
+  const [searchKeyword, setSearchKeyword] = useState<string>("");
+  const [selectedKeyAlias, setSelectedKeyAlias] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedStatusCode, setSelectedStatusCode] = useState<string>("");
+
+  // Drawer state
+  const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
+
+  // Fetch metrics
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/v1/metrics/summary?date=${selectedDate}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMetrics(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch metrics:", err);
+    }
+  }, [selectedDate]);
+
+  // Fetch logs
+  const fetchLogs = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: "20",
+        start_date: selectedDate,
+        end_date: selectedDate,
+      });
+
+      if (searchKeyword.trim()) {
+        params.append("search", searchKeyword.trim());
+      }
+      if (selectedKeyAlias.trim()) {
+        params.append("api_key_alias", selectedKeyAlias.trim());
+      }
+      if (selectedModel.trim()) {
+        params.append("model_used", selectedModel.trim());
+      }
+      if (selectedStatusCode.trim()) {
+        params.append("status_code", selectedStatusCode.trim());
+      }
+
+      const res = await fetch(`/api/v1/logs?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLogsData(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch logs:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
+
+  // Initial load and auto refresh
+  useEffect(() => {
+    fetchMetrics();
+    fetchLogs();
+  }, [fetchMetrics, fetchLogs]);
+
+  useEffect(() => {
+    if (autoRefresh <= 0) return;
+    const interval = setInterval(() => {
+      fetchMetrics();
+      fetchLogs();
+    }, autoRefresh * 1000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchMetrics, fetchLogs]);
+
+  const handleManualRefresh = () => {
+    fetchMetrics();
+    fetchLogs();
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Top Navbar */}
+      <Navbar
+        selectedDate={selectedDate}
+        onDateChange={(d) => {
+          setSelectedDate(d);
+          setPage(1);
+        }}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
+        onManualRefresh={handleManualRefresh}
+        loading={loading}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+        {/* Metric Cards Banner */}
+        <MetricCards metrics={metrics} loading={loading} />
+
+        {/* Audit Logs Table */}
+        <LogsTable
+          logsData={logsData}
+          loading={loading}
+          page={page}
+          onPageChange={setPage}
+          searchKeyword={searchKeyword}
+          onSearchChange={(s) => {
+            setSearchKeyword(s);
+            setPage(1);
+          }}
+          selectedKeyAlias={selectedKeyAlias}
+          onKeyAliasChange={(k) => {
+            setSelectedKeyAlias(k);
+            setPage(1);
+          }}
+          selectedModel={selectedModel}
+          onModelChange={(m) => {
+            setSelectedModel(m);
+            setPage(1);
+          }}
+          selectedStatusCode={selectedStatusCode}
+          onStatusCodeChange={(c) => {
+            setSelectedStatusCode(c);
+            setPage(1);
+          }}
+          onSelectLog={(log) => setSelectedLog(log)}
+          selectedLogId={selectedLog?.request_id ?? null}
+        />
+      </main>
+
+      {/* Sliding Payload Drawer */}
+      <PayloadDrawer log={selectedLog} onClose={() => setSelectedLog(null)} />
+    </div>
+  );
+};
