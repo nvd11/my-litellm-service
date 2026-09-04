@@ -44,10 +44,28 @@ model_list:
       provider_key_alias: "OPENAI_API_KEY_FREE_3"
 
   # === 🛡️ 应急保底组 (A6 API 中转站 - 官方 5 折实收: $0.375/1M Input, $1.875/1M Output) ===
-  # Gemini 3.7 Flash - A6 API Relay
+  # Gemini 3.8 Flash - A6 API Relay
+  - model_name: gemini-3.8-backup
+    litellm_params:
+      model: openai/gemini-3.8-flash
+      api_base: https://api.a6api.com/v1
+      api_key: os.environ/A6_API_KEY
+      input_cost_per_token: 0.000000375
+      output_cost_per_token: 0.000001875
+      rpm: 60
+      metadata:
+        provider: "a6api.com"
+        provider_key_alias: "A6_API_KEY"
+    model_info:
+      input_cost_per_token: 0.000000375
+      output_cost_per_token: 0.000001875
+      provider: "a6api.com"
+      provider_key_alias: "A6_API_KEY"
+
+  # 兼容保留旧别名 (指向 A6 3.8 Flash)
   - model_name: gemini-3.7-backup
     litellm_params:
-      model: openai/gemini-3.7-flash
+      model: openai/gemini-3.8-flash
       api_base: https://api.a6api.com/v1
       api_key: os.environ/A6_API_KEY
       input_cost_per_token: 0.000000375
@@ -78,8 +96,8 @@ router_settings:
   cooldown_time: 60
 
   fallbacks:
-    - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.7-backup"]
-    - gemini-3.7-flash: ["gemini-3.7-backup"]
+    - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.8-backup"]
+    - gemini-3.7-flash: ["gemini-3.8-backup"]
 
 litellm_settings:
   # 🎯 异步审计日志与汇率落库回调 (Phase 2 Custom Logger)

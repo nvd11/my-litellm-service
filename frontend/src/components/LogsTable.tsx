@@ -122,7 +122,9 @@ export const LogsTable: React.FC<LogsTableProps> = ({
             className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部模型</option>
+            <option value="gemini-3.8-flash">gemini-3.8-flash</option>
             <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+            <option value="gemini-3.8-backup">gemini-3.8-backup</option>
             <option value="gemini-3.7-backup">gemini-3.7-backup</option>
           </select>
 
