@@ -67,6 +67,7 @@ async def test_list_audit_logs(mock_test_settings: Settings) -> None:
     mock_row.fx_rate = 7.23
     mock_row.latency_ms = 850
     mock_row.status_code = 200
+    mock_row.error_msg = None
     mock_row.created_at = datetime(2026, 9, 3, 15, 0, 0, tzinfo=UTC)
 
     mock_conn = AsyncMock()

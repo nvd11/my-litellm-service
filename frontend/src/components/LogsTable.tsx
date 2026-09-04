@@ -43,23 +43,29 @@ export const LogsTable: React.FC<LogsTableProps> = ({
   onSelectLog,
   selectedLogId,
 }) => {
-  const getStatusBadge = (statusCode: number) => {
+  const getStatusBadge = (statusCode: number, errorMsg?: string | null) => {
     if (statusCode === 200) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
           <CheckCircle className="w-3 h-3" /> 200 OK
         </span>
       );
     }
     if (statusCode === 429) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        <span
+          title={errorMsg || "429 Rate Limit Exceeded"}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 border border-amber-500/20 cursor-help"
+        >
           <AlertTriangle className="w-3 h-3" /> 429 Limit
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+      <span
+        title={errorMsg || `${statusCode} Error`}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-600 border border-rose-500/20 cursor-help"
+      >
         <XCircle className="w-3 h-3" /> {statusCode} Error
       </span>
     );
@@ -214,7 +220,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
                     <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-medium text-amber-600">
                       {log.latency_ms}ms
                     </td>
-                    <td className="py-3 px-4 whitespace-nowrap">{getStatusBadge(log.status_code)}</td>
+                    <td className="py-3 px-4 whitespace-nowrap">{getStatusBadge(log.status_code, log.error_msg)}</td>
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       <button
                         onClick={(e) => {

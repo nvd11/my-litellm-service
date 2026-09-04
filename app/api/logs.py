@@ -34,6 +34,7 @@ class LogItem(BaseModel):
     fx_rate: float
     latency_ms: int
     status_code: int
+    error_msg: str | None = None
     created_at: datetime
     prompt_url: str
     response_url: str
@@ -148,6 +149,7 @@ async def list_audit_logs(
                 fx_rate=float(row.fx_rate),
                 latency_ms=int(row.latency_ms),
                 status_code=int(row.status_code),
+                error_msg=str(row.error_msg) if getattr(row, "error_msg", None) else None,
                 created_at=created_dt_hkt,
                 prompt_url=prompt_url,
                 response_url=response_url,

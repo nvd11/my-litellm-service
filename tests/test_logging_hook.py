@@ -376,6 +376,7 @@ async def test_async_log_success_event_standard(monkeypatch):
     assert float(params["fx_rate"]) == 7.2500
     assert params["latency_ms"] == 1500
     assert params["status_code"] == 200
+    assert params["error_msg"] is None
 
 
 @pytest.mark.asyncio
@@ -474,6 +475,7 @@ async def test_async_log_failure_event_rate_limit(monkeypatch):
     assert float(params["cost_usd"]) == 0.0
     assert float(params["cost_cny"]) == 0.0
     assert params["latency_ms"] == 300
+    assert params["error_msg"] == "Rate limit exceeded"
 
 
 @pytest.mark.asyncio
@@ -500,6 +502,7 @@ async def test_async_log_failure_event_timeout(monkeypatch):
 
     assert params["status_code"] == 504
     assert params["latency_ms"] == 30000
+    assert params["error_msg"] == "Request timed out after 30s"
 
 
 # ==============================================================================

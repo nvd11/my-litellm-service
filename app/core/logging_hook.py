@@ -389,6 +389,41 @@ def _extract_error_status_code(response_obj: Any) -> int:
     return 500
 
 
+def _extract_error_message(response_obj: Any, kwargs: dict[str, Any]) -> str | None:
+    """从异常对象或上下文参数中提取精确、易读的错误详情信息."""
+    candidates = [
+        response_obj,
+        kwargs.get("exception"),
+        kwargs.get("original_exception"),
+        kwargs.get("error"),
+    ]
+    for cand in candidates:
+        if cand is None:
+            continue
+        if isinstance(cand, Exception):
+            msg = str(cand).strip()
+            if msg:
+                return msg
+            return type(cand).__name__
+        if isinstance(cand, dict):
+            if "message" in cand and cand["message"]:
+                return str(cand["message"])
+            if "error" in cand and cand["error"]:
+                err_val = cand["error"]
+                if isinstance(err_val, dict) and "message" in err_val:
+                    return str(err_val["message"])
+                return str(err_val)
+        if hasattr(cand, "message") and getattr(cand, "message"):
+            return str(getattr(cand, "message"))
+        if hasattr(cand, "description") and getattr(cand, "description"):
+            return str(getattr(cand, "description"))
+        cand_str = str(cand).strip()
+        if cand_str and cand_str.lower() != "none":
+            return cand_str
+
+    return "Unknown error"
+
+
 class DBLoggingLogger(CustomLogger):
     """LiteLLM 异步数据库日志审计 Hook (基于 SQLAlchemy 2.0 Core).
 
@@ -466,6 +501,7 @@ class DBLoggingLogger(CustomLogger):
                 fx_rate=fx_rate,
                 latency_ms=latency_ms,
                 status_code=status_code,
+                error_msg=None,
             )
 
             engine = get_async_engine(settings)
@@ -524,6 +560,7 @@ class DBLoggingLogger(CustomLogger):
             fx_rate = await get_usd_to_cny_rate(settings)
             latency_ms = _calculate_latency_ms(start_time, end_time, kwargs)
             status_code = _extract_error_status_code(response_obj)
+            error_msg = _extract_error_message(response_obj, kwargs)
 
             stmt = insert(llm_request_logs).values(
                 id=record_id,
@@ -541,6 +578,7 @@ class DBLoggingLogger(CustomLogger):
                 fx_rate=fx_rate,
                 latency_ms=latency_ms,
                 status_code=status_code,
+                error_msg=error_msg,
             )
 
             engine = get_async_engine(settings)

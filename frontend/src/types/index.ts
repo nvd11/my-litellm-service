@@ -14,6 +14,7 @@ export interface LogItem {
   fx_rate: number;
   latency_ms: number;
   status_code: number;
+  error_msg?: string | null;
   created_at: string;
   prompt_url: string;
   response_url: string;

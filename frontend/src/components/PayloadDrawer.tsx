@@ -16,6 +16,7 @@ import {
   ChevronUp,
   ChevronsUpDown,
   Wrench,
+  XCircle,
 } from "lucide-react";
 import { LogItem, PayloadData } from "../types";
 
@@ -258,6 +259,34 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             </div>
           ) : activeTab === "formatted" ? (
             <div className="space-y-3.5">
+              {/* 异常报错卡片 (HTTP 失败或存在 error_msg 时置顶展示) */}
+              {(log.error_msg || log.status_code !== 200) && (
+                <div className="bg-rose-50/80 border border-rose-200 rounded-xl p-3.5 shadow-2xs space-y-1.5 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between text-rose-800 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <XCircle className="w-4 h-4 text-rose-600" />
+                      调用异常报错 (HTTP {log.status_code})
+                    </span>
+                    {log.error_msg && (
+                      <button
+                        onClick={() => handleCopy(log.error_msg || "", "err_msg")}
+                        className="text-slate-500 hover:text-rose-900 flex items-center gap-1 text-[11px] font-medium"
+                      >
+                        {copiedKey === "err_msg" ? (
+                          <Check className="w-3 h-3 text-emerald-600" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        {copiedKey === "err_msg" ? "已复制" : "复制错误"}
+                      </button>
+                    )}
+                  </div>
+                  <pre className="bg-white p-2.5 rounded-lg border border-rose-200/80 text-[11px] font-mono text-rose-900 whitespace-pre-wrap break-all leading-relaxed">
+                    {log.error_msg || `上游返回 HTTP ${log.status_code} 异常错误`}
+                  </pre>
+                </div>
+              )}
+
               {/* 卡片 1: System Prompt (支持独立折叠) */}
               {payloadData?.prompt?.system_prompt && (
                 <div className="bg-purple-50/70 border border-purple-200 rounded-xl overflow-hidden shadow-2xs transition-all">
@@ -745,6 +774,14 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     ¥{log.cost_cny.toFixed(6)} (${log.cost_usd.toFixed(6)})
                   </span>
                 </div>
+                {log.error_msg && (
+                  <div className="col-span-2">
+                    <span className="text-rose-500 font-semibold block">异常报错信息</span>
+                    <span className="font-mono text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-200 block whitespace-pre-wrap break-all mt-0.5">
+                      {log.error_msg}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

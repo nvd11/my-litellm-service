@@ -26,6 +26,7 @@ SELECT
     l.fx_rate,
     l.latency_ms,
     l.status_code,
+    l.error_msg,
     l.created_at,
     -- 动态拼接 NUC MinIO S3 Prompt 输入报文直达超链接
     CONCAT(

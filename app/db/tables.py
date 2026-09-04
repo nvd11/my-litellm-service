@@ -20,6 +20,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    Text,
     func,
 )
 
@@ -133,6 +134,12 @@ llm_request_logs = Table(
         nullable=False,
         server_default="200",
         comment="HTTP 响应状态码",
+    ),
+    Column(
+        "error_msg",
+        Text,
+        nullable=True,
+        comment="API 调用失败的具体异常信息",
     ),
     # 记录创建时间戳 (默认数据库当前时间)
     Column(

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS llm_request_logs (
     fx_rate DECIMAL(8, 4) NOT NULL DEFAULT 7.2300,
     latency_ms INT NOT NULL DEFAULT 0,
     status_code INT NOT NULL DEFAULT 200,
+    error_msg TEXT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_logs_created_at (created_at),
     INDEX idx_logs_model_used (model_used),
@@ -57,6 +58,7 @@ SELECT
     l.fx_rate,
     l.latency_ms,
     l.status_code,
+    l.error_msg,
     l.created_at,
     CONCAT(
         'https://minio.jppwl.asia/litellm-payloads/',
