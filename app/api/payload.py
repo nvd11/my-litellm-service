@@ -39,10 +39,10 @@ async def get_request_payload(
     settings: Settings = Depends(get_settings),
 ) -> Any:
     """Fetch structured Prompt and Response payloads directly from NUC MinIO S3."""
-    date_str: str | None = target_date.strftime("%Y-%m-%d") if target_date else None
+    date_str: str | None = None
 
-    # 1. 若未传入日期，尝试从 MySQL 查询该 request_id 的 created_at
-    if not date_str:
+    # 1. 优先从 MySQL 查询该 request_id 实际落库时的 UTC 日期分区 (对齐 S3 物理路径)
+    try:
         engine = get_async_engine(settings)
         stmt = (
             select(llm_request_logs.c.created_at)
@@ -54,10 +54,15 @@ async def get_request_payload(
             created_dt = result.scalar_one_or_none()
             if created_dt and isinstance(created_dt, datetime):
                 date_str = created_dt.strftime("%Y-%m-%d")
+    except Exception as db_err:
+        logger.debug("Could not query created_at from MySQL for payload %s: %s", request_id, db_err)
 
-    # 2. 默认退化为今日日期
+    # 2. 兜底回退至传入日期或当前日期
     if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        if target_date:
+            date_str = target_date.strftime("%Y-%m-%d")
+        else:
+            date_str = datetime.now().strftime("%Y-%m-%d")
 
     prefix = f"{date_str}/{request_id}"
     base_url = settings.payload_public_base_url.rstrip("/")

@@ -7,7 +7,12 @@ import { LogItem, PaginatedLogsResponse, SummaryMetrics } from "./types";
 
 export const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
-    return new Date().toISOString().split("T")[0];
+    // 默认选用客户端本地/香港时间自然日 (YYYY-MM-DD)，避免 UTC 跨日偏差
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   });
   const [autoRefresh, setAutoRefresh] = useState<number>(15);
   const [loading, setLoading] = useState<boolean>(false);

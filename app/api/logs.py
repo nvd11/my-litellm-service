@@ -1,6 +1,6 @@
 """LiteLLM Audit Logs Query API Module."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -11,6 +11,9 @@ from app.core.config import Settings, get_settings
 from app.db import get_async_engine, llm_request_logs
 
 router = APIRouter(tags=["Audit Logs"])
+
+# 业务基准时区：香港时间 (HKT, UTC+8)
+HKT = timezone(timedelta(hours=8))
 
 
 class LogItem(BaseModel):
@@ -50,25 +53,25 @@ class PaginatedLogsResponse(BaseModel):
 async def list_audit_logs(
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
-    start_date: date | None = Query(None, description="Start date filter (YYYY-MM-DD)"),
-    end_date: date | None = Query(None, description="End date filter (YYYY-MM-DD)"),
+    start_date: date | None = Query(None, description="Start date filter in HKT (YYYY-MM-DD)"),
+    end_date: date | None = Query(None, description="End date filter in HKT (YYYY-MM-DD)"),
     api_key_alias: str | None = Query(None, description="Filter by client API key alias"),
     model_used: str | None = Query(None, description="Filter by actual model used"),
     status_code: int | None = Query(None, description="Filter by HTTP status code"),
     search: str | None = Query(None, description="Keyword search in request_id or key alias"),
     settings: Settings = Depends(get_settings),
 ) -> Any:
-    """Retrieve paginated audit logs with multi-condition filters and S3 hyperlinks."""
+    """Retrieve paginated audit logs with multi-condition filters and S3 hyperlinks in HKT."""
     engine = get_async_engine(settings)
 
-    # 1. 构造过滤条件列表
+    # 1. 构造过滤条件列表 (将前端传入的 HKT 日期区间映射为 MySQL 底层的 UTC 存储区间)
     conditions: list[Any] = []
 
     if start_date:
-        start_min = datetime.combine(start_date, datetime.min.time())
+        start_min = datetime.combine(start_date, datetime.min.time()) - timedelta(hours=8)
         conditions.append(llm_request_logs.c.created_at >= start_min)
     if end_date:
-        end_max = datetime.combine(end_date, datetime.max.time())
+        end_max = datetime.combine(end_date, datetime.max.time()) - timedelta(hours=8)
         conditions.append(llm_request_logs.c.created_at <= end_max)
     if api_key_alias and api_key_alias.strip():
         conditions.append(llm_request_logs.c.api_key_alias == api_key_alias.strip())
@@ -113,12 +116,20 @@ async def list_audit_logs(
     items: list[LogItem] = []
 
     for row in rows:
-        created_dt: datetime = row.created_at
-        date_str = created_dt.strftime("%Y-%m-%d")
+        created_dt_raw: datetime = row.created_at
+        # S3 存储分区严格基于入库时的 UTC 日期
+        s3_date_str = created_dt_raw.strftime("%Y-%m-%d")
         req_id = row.request_id
 
-        prompt_url = f"{base_url}/{date_str}/{req_id}/prompt.json"
-        response_url = f"{base_url}/{date_str}/{req_id}/response.json"
+        prompt_url = f"{base_url}/{s3_date_str}/{req_id}/prompt.json"
+        response_url = f"{base_url}/{s3_date_str}/{req_id}/response.json"
+
+        # 将展示给客户端的时间戳显式附加 UTC 时区并转换为香港时间 (HKT, UTC+8)
+        created_dt_hkt = (
+            created_dt_raw.replace(tzinfo=timezone.utc).astimezone(HKT)
+            if created_dt_raw.tzinfo is None
+            else created_dt_raw.astimezone(HKT)
+        )
 
         items.append(
             LogItem(
@@ -137,7 +148,7 @@ async def list_audit_logs(
                 fx_rate=float(row.fx_rate),
                 latency_ms=int(row.latency_ms),
                 status_code=int(row.status_code),
-                created_at=created_dt,
+                created_at=created_dt_hkt,
                 prompt_url=prompt_url,
                 response_url=response_url,
             )

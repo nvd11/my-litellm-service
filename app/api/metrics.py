@@ -1,6 +1,6 @@
 """LiteLLM Summary Metrics & Analytics API Module."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -11,6 +11,9 @@ from app.core.config import Settings, get_settings
 from app.db import get_async_engine, llm_request_logs
 
 router = APIRouter(tags=["Metrics"])
+
+# 业务基准时区：香港时间 (HKT, UTC+8)
+HKT = timezone(timedelta(hours=8))
 
 
 class ActiveKeyMetric(BaseModel):
@@ -48,15 +51,16 @@ class SummaryMetricsResponse(BaseModel):
 @router.get("/metrics/summary", response_model=SummaryMetricsResponse)
 async def get_summary_metrics(
     target_date: date | None = Query(
-        None, alias="date", description="Target date (default: today)"
+        None, alias="date", description="Target date in HKT (default: today HKT)"
     ),
     settings: Settings = Depends(get_settings),
 ) -> Any:
-    """Calculate daily summary statistics (requests, tokens, cost, latency, success rate)."""
+    """Calculate daily summary statistics in HKT (requests, tokens, cost, latency, success rate)."""
     engine = get_async_engine(settings)
-    eval_date = target_date or datetime.now().date()
-    start_dt = datetime.combine(eval_date, datetime.min.time())
-    end_dt = datetime.combine(eval_date, datetime.max.time())
+    eval_date = target_date or datetime.now(HKT).date()
+    # 将 HKT 自然日 [00:00:00, 23:59:59.999999] 转换为底层 MySQL 存储的 UTC 时间区间 (-8小时)
+    start_dt = datetime.combine(eval_date, datetime.min.time()) - timedelta(hours=8)
+    end_dt = datetime.combine(eval_date, datetime.max.time()) - timedelta(hours=8)
 
     # 1. 基础日聚合指标查询
     summary_stmt = (

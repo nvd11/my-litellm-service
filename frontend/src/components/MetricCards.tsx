@@ -9,14 +9,32 @@ interface MetricCardsProps {
 
 export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading }) => {
   const formatTokens = (tokens: number) => {
+    if (tokens >= 100_000_000) {
+      const mVal = (tokens / 1_000_000).toFixed(2);
+      const yiVal = (tokens / 100_000_000).toFixed(2);
+      return { main: `${mVal} M`, sub: `(约 ${yiVal} 亿)` };
+    }
     if (tokens >= 1_000_000) {
-      return (tokens / 1_000_000).toFixed(2) + " M";
+      const mVal = (tokens / 1_000_000).toFixed(2);
+      const wanVal = (tokens / 10_000).toFixed(0);
+      return { main: `${mVal} M`, sub: `(约 ${wanVal} 万)` };
+    }
+    if (tokens >= 10_000) {
+      const kVal = (tokens / 1_000).toFixed(1);
+      const wanVal = (tokens / 10_000).toFixed(1);
+      return { main: `${kVal} k`, sub: `(约 ${wanVal} 万)` };
     }
     if (tokens >= 1_000) {
-      return (tokens / 1_000).toFixed(1) + " k";
+      return { main: (tokens / 1_000).toFixed(1) + " k", sub: "" };
     }
-    return tokens.toLocaleString();
+    return { main: tokens.toLocaleString(), sub: "" };
   };
+
+  const tokenFormatted = formatTokens(metrics?.today_tokens ?? 0);
+  const avgCostPerM =
+    metrics && metrics.today_tokens > 0
+      ? (metrics.today_cost_cny / (metrics.today_tokens / 1_000_000)).toFixed(4)
+      : null;
 
   return (
     <div className="space-y-4">
@@ -50,11 +68,16 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading }) =>
               <Coins className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
+          <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
             <span className="text-2xl font-bold text-purple-700">
-              {loading && !metrics ? "..." : formatTokens(metrics?.today_tokens ?? 0)}
+              {loading && !metrics ? "..." : tokenFormatted.main}
             </span>
             <span className="text-xs text-slate-500 font-medium">Tokens</span>
+            {tokenFormatted.sub && (
+              <span className="text-xs text-purple-600 font-semibold ml-0.5">
+                {tokenFormatted.sub}
+              </span>
+            )}
           </div>
           <p className="mt-2 text-xs text-slate-500">含输入 Context 与模型输出</p>
         </div>
@@ -73,7 +96,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading }) =>
             </span>
             <span className="text-xs text-slate-500">(${(metrics?.today_cost_usd ?? 0).toFixed(4)})</span>
           </div>
-          <p className="mt-2 text-xs text-slate-500">按当日中行实时汇率动态折算</p>
+          <p className="mt-2 text-xs text-slate-500">
+            按当日汇率折算 {avgCostPerM ? `(均价: ¥${avgCostPerM}/1M)` : ""}
+          </p>
         </div>
 
         {/* Card 4: Average Latency */}
