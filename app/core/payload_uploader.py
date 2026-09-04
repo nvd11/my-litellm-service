@@ -57,6 +57,34 @@ def _json_default(obj: Any) -> Any:
     return str(obj)
 
 
+def _extract_text_content(content: Any) -> str:
+    """Extract human-readable plain text from strings, lists of multimodal blocks, or dicts."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                if "text" in item:
+                    parts.append(str(item["text"]))
+                elif "content" in item:
+                    parts.append(_extract_text_content(item["content"]))
+                else:
+                    parts.append(str(item))
+            else:
+                parts.append(str(item))
+        return "\n".join(p for p in parts if p)
+    if isinstance(content, dict):
+        if "text" in content:
+            return str(content["text"])
+        return str(content)
+    return str(content)
+
+
 def extract_prompt_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Extract and structure clear, readable request prompt details."""
     raw_messages = kwargs.get("messages") or []
@@ -71,7 +99,7 @@ def extract_prompt_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
                 role = str(msg.get("role", "")).lower()
                 content = msg.get("content")
                 if content is not None:
-                    text_val = content if isinstance(content, str) else str(content)
+                    text_val = _extract_text_content(content)
                     if role == "system":
                         system_prompts.append(text_val)
                     elif role == "user":
@@ -132,11 +160,11 @@ def extract_response_payload(response_obj: Any) -> dict[str, Any]:
         finish_reason = first_choice.get("finish_reason")
         msg = first_choice.get("message")
         if isinstance(msg, dict):
-            reply_content = msg.get("content")
-            reasoning_content = msg.get("reasoning_content")
+            reply_content = _extract_text_content(msg.get("content"))
+            reasoning_content = _extract_text_content(msg.get("reasoning_content"))
             tool_calls = msg.get("tool_calls")
         elif first_choice.get("text"):
-            reply_content = first_choice.get("text")
+            reply_content = _extract_text_content(first_choice.get("text"))
 
     usage = raw.get("usage")
 

@@ -94,6 +94,28 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
     setCollapsed({});
   };
 
+  // 安全内容渲染器：彻底杜绝任何数组、对象直接渲染导致 React 崩溃
+  const renderContent = (content: any): string => {
+    if (content === null || content === undefined) return "";
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      return content
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object") {
+            return item.text || item.content || JSON.stringify(item);
+          }
+          return String(item);
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (typeof content === "object") {
+      return content.text || content.content || JSON.stringify(content, null, 2);
+    }
+    return String(content);
+  };
+
   if (!log) return null;
 
   return (
@@ -214,14 +236,14 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       <Shield className="w-3.5 h-3.5" /> System Prompt (人设与系统指令)
                       {collapsed["system"] && (
                         <span className="text-[10px] text-purple-300/70 font-normal ml-2 truncate max-w-[200px]">
-                          {payloadData.prompt.system_prompt.slice(0, 30)}...
+                          {renderContent(payloadData.prompt.system_prompt).slice(0, 30)}...
                         </span>
                       )}
                     </span>
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() =>
-                          handleCopy(payloadData.prompt.system_prompt || "", "system")
+                          handleCopy(renderContent(payloadData.prompt.system_prompt), "system")
                         }
                         className="text-slate-400 hover:text-purple-300 flex items-center gap-1 p-1 rounded"
                       >
@@ -246,7 +268,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   </div>
                   {!collapsed["system"] && (
                     <div className="p-3 bg-slate-950/70 text-slate-300 whitespace-pre-wrap leading-relaxed font-sans border-t border-purple-900/30">
-                      {payloadData.prompt.system_prompt}
+                      {renderContent(payloadData.prompt.system_prompt)}
                     </div>
                   )}
                 </div>
@@ -262,7 +284,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     <User className="w-3.5 h-3.5" /> User Prompt (本次最新提问)
                     {collapsed["user"] && payloadData?.prompt?.user_prompt && (
                       <span className="text-[10px] text-blue-300/70 font-normal ml-2 truncate max-w-[200px]">
-                        {payloadData.prompt.user_prompt.slice(0, 30)}...
+                        {renderContent(payloadData.prompt.user_prompt).slice(0, 30)}...
                       </span>
                     )}
                   </span>
@@ -270,7 +292,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     <button
                       onClick={() =>
                         handleCopy(
-                          payloadData?.prompt?.user_prompt || "无用户提示词",
+                          renderContent(payloadData?.prompt?.user_prompt) || "无用户提示词",
                           "user"
                         )
                       }
@@ -297,7 +319,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                 </div>
                 {!collapsed["user"] && (
                   <div className="p-3 bg-slate-950/70 text-slate-200 whitespace-pre-wrap leading-relaxed font-sans border-t border-blue-900/30 font-medium">
-                    {payloadData?.prompt?.user_prompt || "（无最新单独用户输入）"}
+                    {renderContent(payloadData?.prompt?.user_prompt) || "（无最新单独用户输入）"}
                   </div>
                 )}
               </div>
@@ -312,7 +334,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     <Bot className="w-3.5 h-3.5" /> Assistant Reply (模型生成回复)
                     {collapsed["reply"] && payloadData?.response?.reply && (
                       <span className="text-[10px] text-emerald-300/70 font-normal ml-2 truncate max-w-[200px]">
-                        {payloadData.response.reply.slice(0, 30)}...
+                        {renderContent(payloadData.response.reply).slice(0, 30)}...
                       </span>
                     )}
                   </span>
@@ -320,7 +342,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     <button
                       onClick={() =>
                         handleCopy(
-                          payloadData?.response?.reply || "无模型回复",
+                          renderContent(payloadData?.response?.reply) || "无模型回复",
                           "reply"
                         )
                       }
@@ -347,7 +369,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                 </div>
                 {!collapsed["reply"] && (
                   <div className="p-3 bg-slate-950/70 text-slate-100 whitespace-pre-wrap leading-relaxed font-sans border-t border-emerald-900/30">
-                    {payloadData?.response?.reply || (
+                    {renderContent(payloadData?.response?.reply) || (
                       <span className="text-slate-500 italic">
                         {payloadData?.response?.reasoning_content
                           ? "（模型仅输出思考过程，未生成正文）"
@@ -369,7 +391,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       <Brain className="w-3.5 h-3.5" /> Reasoning Process (思维链与思考过程)
                       {collapsed["reasoning"] && (
                         <span className="text-[10px] text-amber-300/70 font-normal ml-2 truncate max-w-[200px]">
-                          {payloadData.response.reasoning_content.slice(0, 30)}...
+                          {renderContent(payloadData.response.reasoning_content).slice(0, 30)}...
                         </span>
                       )}
                     </span>
@@ -377,7 +399,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       <button
                         onClick={() =>
                           handleCopy(
-                            payloadData.response.reasoning_content || "",
+                            renderContent(payloadData.response.reasoning_content) || "",
                             "reasoning"
                           )
                         }
@@ -404,7 +426,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   </div>
                   {!collapsed["reasoning"] && (
                     <div className="p-3 bg-slate-950/70 text-amber-200/90 whitespace-pre-wrap leading-relaxed font-mono text-[11px] border-t border-amber-900/30 max-h-60 overflow-y-auto">
-                      {payloadData.response.reasoning_content}
+                      {renderContent(payloadData.response.reasoning_content)}
                     </div>
                   )}
                 </div>
@@ -455,7 +477,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                                 </span>
                                 {isMsgCollapsed && (
                                   <span className="text-[10px] text-slate-400 font-normal truncate max-w-[280px]">
-                                    {(m.content || "").slice(0, 40)}...
+                                    {renderContent(m.content).slice(0, 40)}...
                                   </span>
                                 )}
                               </div>
@@ -463,7 +485,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleCopy(m.content || "", msgKey);
+                                    handleCopy(renderContent(m.content), msgKey);
                                   }}
                                   className="hover:text-blue-400 p-0.5"
                                   title="复制此条"
@@ -485,7 +507,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                             {/* 单条消息正文 */}
                             {!isMsgCollapsed && (
                               <div className="text-slate-300 whitespace-pre-wrap font-sans pl-1.5 text-[11px] leading-relaxed bg-slate-900/50 p-2 rounded-lg border border-slate-850">
-                                {m.content}
+                                {renderContent(m.content)}
                               </div>
                             )}
                           </div>
