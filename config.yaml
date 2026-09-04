@@ -80,6 +80,24 @@ model_list:
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
+  # === 🌙 Kimi K3 深度思考推理大模型 (A6 API Relay - 官方 5 折实收: $1.50/1M Input, $7.50/1M Output) ===
+  - model_name: kimi-k3
+    litellm_params:
+      model: openai/kimi-k3
+      api_base: https://api.a6api.com/v1
+      api_key: os.environ/A6_API_KEY
+      input_cost_per_token: 0.0000015
+      output_cost_per_token: 0.0000075
+      rpm: 60
+      metadata:
+        provider: "a6api.com"
+        provider_key_alias: "A6_API_KEY"
+    model_info:
+      input_cost_per_token: 0.0000015
+      output_cost_per_token: 0.0000075
+      provider: "a6api.com"
+      provider_key_alias: "A6_API_KEY"
+
 router_settings:
   routing_strategy: "least-busy" # 负载均衡：优先选择当前空闲/负载最小的 Key 派发请求
 

@@ -126,6 +126,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
             <option value="gemini-3.7-flash">gemini-3.7-flash</option>
             <option value="gemini-3.8-backup">gemini-3.8-backup</option>
             <option value="gemini-3.7-backup">gemini-3.7-backup</option>
+            <option value="kimi-k3">kimi-k3</option>
           </select>
 
           {/* Status Code Filter */}
