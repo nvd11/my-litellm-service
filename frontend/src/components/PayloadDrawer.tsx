@@ -12,6 +12,9 @@ import {
   Code2,
   Info,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
 } from "lucide-react";
 import { LogItem, PayloadData } from "../types";
 
@@ -26,7 +29,9 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   const [payloadData, setPayloadData] = useState<PayloadData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [expandMessages, setExpandMessages] = useState<boolean>(true);
+
+  // 折叠控制状态：key 为 section 名称或 "msg-{index}"，value 为 true 表示已收起/折叠
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!log) {
@@ -62,16 +67,43 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  const toggleCollapse = (key: string) => {
+    setCollapsed((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const collapseAll = () => {
+    const next: Record<string, boolean> = {
+      system: true,
+      user: true,
+      reply: true,
+      reasoning: true,
+      messages: true,
+    };
+    if (payloadData?.prompt?.messages) {
+      payloadData.prompt.messages.forEach((_, idx) => {
+        next[`msg-${idx}`] = true;
+      });
+    }
+    setCollapsed(next);
+  };
+
+  const expandAll = () => {
+    setCollapsed({});
+  };
+
   if (!log) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/60 backdrop-blur-sm flex justify-end">
-      {/* Background click to close */}
+      {/* 背景蒙版点击关闭 */}
       <div className="flex-1" onClick={onClose} />
 
-      {/* Sliding Panel */}
+      {/* 右侧滑动面板 */}
       <div className="w-full max-w-2xl bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
-        {/* Drawer Header */}
+        {/* Drawer 顶栏 */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-850/70">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
@@ -107,205 +139,358 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex border-b border-slate-800 px-4 bg-slate-900 text-xs font-semibold">
-          <button
-            onClick={() => setActiveTab("formatted")}
-            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
-              activeTab === "formatted"
-                ? "border-blue-500 text-blue-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" /> 结构化视图
-          </button>
-          <button
-            onClick={() => setActiveTab("raw")}
-            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
-              activeTab === "raw"
-                ? "border-blue-500 text-blue-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5" /> 原始 JSON 报文
-          </button>
-          <button
-            onClick={() => setActiveTab("meta")}
-            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
-              activeTab === "meta"
-                ? "border-blue-500 text-blue-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Info className="w-3.5 h-3.5" /> 调用元数据
-          </button>
+        {/* Tab 导航与快速折叠按钮 */}
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 bg-slate-900 text-xs font-semibold">
+          <div className="flex">
+            <button
+              onClick={() => setActiveTab("formatted")}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
+                activeTab === "formatted"
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" /> 结构化视图
+            </button>
+            <button
+              onClick={() => setActiveTab("raw")}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
+                activeTab === "raw"
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5" /> 原始 JSON 报文
+            </button>
+            <button
+              onClick={() => setActiveTab("meta")}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
+                activeTab === "meta"
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Info className="w-3.5 h-3.5" /> 调用元数据
+            </button>
+          </div>
+
+          {/* 全局全部折叠 / 全部展开快捷按钮 */}
+          {activeTab === "formatted" && (
+            <div className="flex items-center gap-2 text-[11px] font-normal text-slate-400">
+              <button
+                onClick={expandAll}
+                className="hover:text-blue-400 flex items-center gap-0.5"
+              >
+                <ChevronDown className="w-3 h-3" /> 全部展开
+              </button>
+              <span>|</span>
+              <button
+                onClick={collapseAll}
+                className="hover:text-blue-400 flex items-center gap-0.5"
+              >
+                <ChevronUp className="w-3 h-3" /> 全部收起
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Drawer Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+        {/* Drawer 主体区域 */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
           {loading ? (
             <div className="py-20 text-center text-slate-500 flex flex-col items-center gap-2">
               <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               <span>正在从 NUC MinIO 读取原始 Payload...</span>
             </div>
           ) : activeTab === "formatted" ? (
-            <div className="space-y-4">
-              {/* Card 1: System Prompt */}
+            <div className="space-y-3.5">
+              {/* 卡片 1: System Prompt (支持独立折叠) */}
               {payloadData?.prompt?.system_prompt && (
-                <div className="bg-purple-950/20 border border-purple-800/40 rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between text-purple-400 font-semibold">
+                <div className="bg-purple-950/20 border border-purple-800/40 rounded-xl overflow-hidden transition-all">
+                  <div
+                    onClick={() => toggleCollapse("system")}
+                    className="p-3 bg-purple-950/30 flex items-center justify-between text-purple-400 font-semibold cursor-pointer hover:bg-purple-900/20 transition-colors select-none"
+                  >
                     <span className="flex items-center gap-1.5">
                       <Shield className="w-3.5 h-3.5" /> System Prompt (人设与系统指令)
-                    </span>
-                    <button
-                      onClick={() =>
-                        handleCopy(payloadData.prompt.system_prompt || "", "system")
-                      }
-                      className="text-slate-400 hover:text-purple-300 flex items-center gap-1"
-                    >
-                      {copiedKey === "system" ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
+                      {collapsed["system"] && (
+                        <span className="text-[10px] text-purple-300/70 font-normal ml-2 truncate max-w-[200px]">
+                          {payloadData.prompt.system_prompt.slice(0, 30)}...
+                        </span>
                       )}
-                      {copiedKey === "system" ? "已复制" : "复制"}
-                    </button>
+                    </span>
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() =>
+                          handleCopy(payloadData.prompt.system_prompt || "", "system")
+                        }
+                        className="text-slate-400 hover:text-purple-300 flex items-center gap-1 p-1 rounded"
+                      >
+                        {copiedKey === "system" ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        {copiedKey === "system" ? "已复制" : "复制"}
+                      </button>
+                      <button
+                        onClick={() => toggleCollapse("system")}
+                        className="text-purple-400 hover:text-purple-200 p-1"
+                      >
+                        {collapsed["system"] ? (
+                          <ChevronDown className="w-4 h-4" />
+                        ) : (
+                          <ChevronUp className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <div className="bg-slate-950/70 rounded-lg p-3 text-slate-300 whitespace-pre-wrap leading-relaxed font-sans border border-purple-900/30">
-                    {payloadData.prompt.system_prompt}
-                  </div>
+                  {!collapsed["system"] && (
+                    <div className="p-3 bg-slate-950/70 text-slate-300 whitespace-pre-wrap leading-relaxed font-sans border-t border-purple-900/30">
+                      {payloadData.prompt.system_prompt}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Card 2: User Prompt */}
-              <div className="bg-blue-950/20 border border-blue-800/40 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between text-blue-400 font-semibold">
+              {/* 卡片 2: User Prompt (支持独立折叠) */}
+              <div className="bg-blue-950/20 border border-blue-800/40 rounded-xl overflow-hidden transition-all">
+                <div
+                  onClick={() => toggleCollapse("user")}
+                  className="p-3 bg-blue-950/30 flex items-center justify-between text-blue-400 font-semibold cursor-pointer hover:bg-blue-900/20 transition-colors select-none"
+                >
                   <span className="flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" /> User Prompt (本次最新提问)
-                  </span>
-                  <button
-                    onClick={() =>
-                      handleCopy(
-                        payloadData?.prompt?.user_prompt || "无用户提示词",
-                        "user"
-                      )
-                    }
-                    className="text-slate-400 hover:text-blue-300 flex items-center gap-1"
-                  >
-                    {copiedKey === "user" ? (
-                      <Check className="w-3 h-3 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
+                    {collapsed["user"] && payloadData?.prompt?.user_prompt && (
+                      <span className="text-[10px] text-blue-300/70 font-normal ml-2 truncate max-w-[200px]">
+                        {payloadData.prompt.user_prompt.slice(0, 30)}...
+                      </span>
                     )}
-                    {copiedKey === "user" ? "已复制" : "复制"}
-                  </button>
-                </div>
-                <div className="bg-slate-950/70 rounded-lg p-3 text-slate-200 whitespace-pre-wrap leading-relaxed font-sans border border-blue-900/30 font-medium">
-                  {payloadData?.prompt?.user_prompt || "（无最新单独用户输入）"}
-                </div>
-              </div>
-
-              {/* Card 3: Assistant Reply */}
-              <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between text-emerald-400 font-semibold">
-                  <span className="flex items-center gap-1.5">
-                    <Bot className="w-3.5 h-3.5" /> Assistant Reply (模型生成回复)
                   </span>
-                  <button
-                    onClick={() =>
-                      handleCopy(
-                        payloadData?.response?.reply || "无模型回复",
-                        "reply"
-                      )
-                    }
-                    className="text-slate-400 hover:text-emerald-300 flex items-center gap-1"
-                  >
-                    {copiedKey === "reply" ? (
-                      <Check className="w-3 h-3 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                    {copiedKey === "reply" ? "已复制" : "复制"}
-                  </button>
-                </div>
-                <div className="bg-slate-950/70 rounded-lg p-3 text-slate-100 whitespace-pre-wrap leading-relaxed font-sans border border-emerald-900/30">
-                  {payloadData?.response?.reply || (
-                    <span className="text-slate-500 italic">
-                      {payloadData?.response?.reasoning_content
-                        ? "（模型仅输出思考过程，未生成正文）"
-                        : "（无文本输出内容）"}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Card 4: Reasoning Content (if present) */}
-              {payloadData?.response?.reasoning_content && (
-                <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between text-amber-400 font-semibold">
-                    <span className="flex items-center gap-1.5">
-                      <Brain className="w-3.5 h-3.5" /> Reasoning Process (思维链与思考过程)
-                    </span>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() =>
                         handleCopy(
-                          payloadData.response.reasoning_content || "",
-                          "reasoning"
+                          payloadData?.prompt?.user_prompt || "无用户提示词",
+                          "user"
                         )
                       }
-                      className="text-slate-400 hover:text-amber-300 flex items-center gap-1"
+                      className="text-slate-400 hover:text-blue-300 flex items-center gap-1 p-1 rounded"
                     >
-                      {copiedKey === "reasoning" ? (
+                      {copiedKey === "user" ? (
                         <Check className="w-3 h-3 text-emerald-400" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
-                      {copiedKey === "reasoning" ? "已复制" : "复制"}
+                      {copiedKey === "user" ? "已复制" : "复制"}
+                    </button>
+                    <button
+                      onClick={() => toggleCollapse("user")}
+                      className="text-blue-400 hover:text-blue-200 p-1"
+                    >
+                      {collapsed["user"] ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
                     </button>
                   </div>
-                  <div className="bg-slate-950/70 rounded-lg p-3 text-amber-200/90 whitespace-pre-wrap leading-relaxed font-mono text-[11px] border border-amber-900/30 max-h-60 overflow-y-auto">
-                    {payloadData.response.reasoning_content}
+                </div>
+                {!collapsed["user"] && (
+                  <div className="p-3 bg-slate-950/70 text-slate-200 whitespace-pre-wrap leading-relaxed font-sans border-t border-blue-900/30 font-medium">
+                    {payloadData?.prompt?.user_prompt || "（无最新单独用户输入）"}
                   </div>
+                )}
+              </div>
+
+              {/* 卡片 3: Assistant Reply (支持独立折叠) */}
+              <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl overflow-hidden transition-all">
+                <div
+                  onClick={() => toggleCollapse("reply")}
+                  className="p-3 bg-emerald-950/30 flex items-center justify-between text-emerald-400 font-semibold cursor-pointer hover:bg-emerald-900/20 transition-colors select-none"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Bot className="w-3.5 h-3.5" /> Assistant Reply (模型生成回复)
+                    {collapsed["reply"] && payloadData?.response?.reply && (
+                      <span className="text-[10px] text-emerald-300/70 font-normal ml-2 truncate max-w-[200px]">
+                        {payloadData.response.reply.slice(0, 30)}...
+                      </span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() =>
+                        handleCopy(
+                          payloadData?.response?.reply || "无模型回复",
+                          "reply"
+                        )
+                      }
+                      className="text-slate-400 hover:text-emerald-300 flex items-center gap-1 p-1 rounded"
+                    >
+                      {copiedKey === "reply" ? (
+                        <Check className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      {copiedKey === "reply" ? "已复制" : "复制"}
+                    </button>
+                    <button
+                      onClick={() => toggleCollapse("reply")}
+                      className="text-emerald-400 hover:text-emerald-200 p-1"
+                    >
+                      {collapsed["reply"] ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                {!collapsed["reply"] && (
+                  <div className="p-3 bg-slate-950/70 text-slate-100 whitespace-pre-wrap leading-relaxed font-sans border-t border-emerald-900/30">
+                    {payloadData?.response?.reply || (
+                      <span className="text-slate-500 italic">
+                        {payloadData?.response?.reasoning_content
+                          ? "（模型仅输出思考过程，未生成正文）"
+                          : "（无文本输出内容）"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 卡片 4: Reasoning Content 思维链 (支持独立折叠) */}
+              {payloadData?.response?.reasoning_content && (
+                <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden transition-all">
+                  <div
+                    onClick={() => toggleCollapse("reasoning")}
+                    className="p-3 bg-amber-950/30 flex items-center justify-between text-amber-400 font-semibold cursor-pointer hover:bg-amber-900/20 transition-colors select-none"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Brain className="w-3.5 h-3.5" /> Reasoning Process (思维链与思考过程)
+                      {collapsed["reasoning"] && (
+                        <span className="text-[10px] text-amber-300/70 font-normal ml-2 truncate max-w-[200px]">
+                          {payloadData.response.reasoning_content.slice(0, 30)}...
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() =>
+                          handleCopy(
+                            payloadData.response.reasoning_content || "",
+                            "reasoning"
+                          )
+                        }
+                        className="text-slate-400 hover:text-amber-300 flex items-center gap-1 p-1 rounded"
+                      >
+                        {copiedKey === "reasoning" ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        {copiedKey === "reasoning" ? "已复制" : "复制"}
+                      </button>
+                      <button
+                        onClick={() => toggleCollapse("reasoning")}
+                        className="text-amber-400 hover:text-amber-200 p-1"
+                      >
+                        {collapsed["reasoning"] ? (
+                          <ChevronDown className="w-4 h-4" />
+                        ) : (
+                          <ChevronUp className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  {!collapsed["reasoning"] && (
+                    <div className="p-3 bg-slate-950/70 text-amber-200/90 whitespace-pre-wrap leading-relaxed font-mono text-[11px] border-t border-amber-900/30 max-h-60 overflow-y-auto">
+                      {payloadData.response.reasoning_content}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Card 5: Full Multi-turn Messages Context Accordion */}
+              {/* 卡片 5: 多轮对话上下文时序 (支持整卡折叠 + 每条消息单项折叠) */}
               {payloadData?.prompt?.messages && payloadData.prompt.messages.length > 0 && (
-                <div className="border border-slate-800 rounded-xl overflow-hidden">
-                  <button
-                    onClick={() => setExpandMessages(!expandMessages)}
-                    className="w-full bg-slate-850 p-3 flex items-center justify-between text-slate-300 font-semibold hover:bg-slate-800 transition-colors"
+                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900">
+                  <div
+                    onClick={() => toggleCollapse("messages")}
+                    className="p-3 bg-slate-850 flex items-center justify-between text-slate-300 font-semibold cursor-pointer hover:bg-slate-800 transition-colors select-none"
                   >
-                    <span>
-                      多轮对话上下文时序 ({payloadData.prompt.messages.length} 条消息)
+                    <span className="flex items-center gap-1.5">
+                      <ChevronsUpDown className="w-3.5 h-3.5 text-blue-400" />
+                      多轮对话上下文列表 ({payloadData.prompt.messages.length} 条消息)
                     </span>
-                    <span className="text-slate-400 text-[11px]">
-                      {expandMessages ? "收起 ▲" : "展开 ▼"}
+                    <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                      {collapsed["messages"] ? "展开 ▼" : "收起 ▲"}
                     </span>
-                  </button>
+                  </div>
 
-                  {expandMessages && (
+                  {!collapsed["messages"] && (
                     <div className="p-3 bg-slate-950/60 divide-y divide-slate-800/60 space-y-2.5">
-                      {payloadData.prompt.messages.map((m, idx) => (
-                        <div key={idx} className="pt-2 first:pt-0 space-y-1">
-                          <div className="flex items-center gap-1.5 font-bold">
-                            <span
-                              className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-mono ${
-                                m.role === "system"
-                                  ? "bg-purple-900/30 text-purple-400"
-                                  : m.role === "user"
-                                  ? "bg-blue-900/30 text-blue-400"
-                                  : "bg-emerald-900/30 text-emerald-400"
-                              }`}
+                      {payloadData.prompt.messages.map((m, idx) => {
+                        const msgKey = `msg-${idx}`;
+                        const isMsgCollapsed = collapsed[msgKey];
+                        return (
+                          <div key={idx} className="pt-2 first:pt-0 space-y-1">
+                            {/* 单条消息头：支持独立点击折叠 */}
+                            <div
+                              onClick={() => toggleCollapse(msgKey)}
+                              className="flex items-center justify-between cursor-pointer group py-0.5"
                             >
-                              {m.role}
-                            </span>
+                              <div className="flex items-center gap-1.5 font-bold">
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-mono ${
+                                    m.role === "system"
+                                      ? "bg-purple-900/30 text-purple-400"
+                                      : m.role === "user"
+                                      ? "bg-blue-900/30 text-blue-400"
+                                      : "bg-emerald-900/30 text-emerald-400"
+                                  }`}
+                                >
+                                  {m.role}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  #{idx + 1}
+                                </span>
+                                {isMsgCollapsed && (
+                                  <span className="text-[10px] text-slate-400 font-normal truncate max-w-[280px]">
+                                    {(m.content || "").slice(0, 40)}...
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-slate-500 group-hover:text-slate-300">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCopy(m.content || "", msgKey);
+                                  }}
+                                  className="hover:text-blue-400 p-0.5"
+                                  title="复制此条"
+                                >
+                                  {copiedKey === msgKey ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                                {isMsgCollapsed ? (
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                ) : (
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                )}
+                              </div>
+                            </div>
+
+                            {/* 单条消息正文 */}
+                            {!isMsgCollapsed && (
+                              <div className="text-slate-300 whitespace-pre-wrap font-sans pl-1.5 text-[11px] leading-relaxed bg-slate-900/50 p-2 rounded-lg border border-slate-850">
+                                {m.content}
+                              </div>
+                            )}
                           </div>
-                          <div className="text-slate-300 whitespace-pre-wrap font-sans pl-1 text-[11px]">
-                            {m.content}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -313,7 +498,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             </div>
           ) : activeTab === "raw" ? (
             <div className="space-y-3">
-              {/* Raw Tab Selector */}
+              {/* Raw Tab 切换 */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setRawTab("prompt")}
@@ -337,7 +522,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                 </button>
               </div>
 
-              {/* Raw JSON Code Viewer */}
+              {/* Raw JSON 展示区 */}
               <div className="relative">
                 <button
                   onClick={() =>
@@ -369,7 +554,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
               </div>
             </div>
           ) : (
-            /* Metadata Tab */
+            /* 元数据 Tab */
             <div className="space-y-3 bg-slate-950/60 rounded-xl p-4 border border-slate-800">
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
