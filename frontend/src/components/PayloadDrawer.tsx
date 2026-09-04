@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
+  Wrench,
 } from "lucide-react";
 import { LogItem, PayloadData } from "../types";
 
@@ -403,14 +404,94 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   <div className="p-3 bg-slate-950/70 text-slate-100 whitespace-pre-wrap leading-relaxed font-sans border-t border-emerald-900/30">
                     {renderContent(payloadData?.response?.reply) || (
                       <span className="text-slate-500 italic">
-                        {payloadData?.response?.reasoning_content
-                          ? "（模型仅输出思考过程，未生成正文）"
+                        {payloadData?.response?.tool_calls && payloadData.response.tool_calls.length > 0
+                          ? `🔧 大模型发起了 ${payloadData.response.tool_calls.length} 个工具调用（请在下方 Tool Calls 卡片查看工具与参数）`
+                          : payloadData?.response?.reasoning_content
+                          ? "（模型仅输出思考过程，未生成文本正文）"
                           : "（无文本输出内容）"}
                       </span>
                     )}
                   </div>
                 )}
               </div>
+
+              {/* 卡片 3.5: Tool Calls (工具调用与参数详情) */}
+              {payloadData?.response?.tool_calls && payloadData.response.tool_calls.length > 0 && (
+                <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden transition-all">
+                  <div
+                    onClick={() => toggleCollapse("tool_calls")}
+                    className="p-3 bg-amber-950/30 flex items-center justify-between text-amber-400 font-semibold cursor-pointer hover:bg-amber-900/20 transition-colors select-none"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Wrench className="w-3.5 h-3.5 text-amber-400" />
+                      Tool Calls (工具调用与参数)
+                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono border border-amber-500/30">
+                        {payloadData.response.tool_calls.length} 个工具
+                      </span>
+                    </span>
+                    <button
+                      onClick={() => toggleCollapse("tool_calls")}
+                      className="text-amber-400 hover:text-amber-200 p-1"
+                    >
+                      {collapsed["tool_calls"] ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                  {!collapsed["tool_calls"] && (
+                    <div className="p-3 bg-slate-950/70 divide-y divide-slate-800/60 space-y-3 border-t border-amber-900/30">
+                      {payloadData.response.tool_calls.map((tc: any, idx: number) => {
+                        const fnName = tc?.function?.name || tc?.name || "未知工具";
+                        let fnArgs = tc?.function?.arguments || tc?.arguments || {};
+                        if (typeof fnArgs === "string") {
+                          try {
+                            fnArgs = JSON.parse(fnArgs);
+                          } catch {
+                            // keep raw string
+                          }
+                        }
+                        const argsStr =
+                          typeof fnArgs === "object"
+                            ? JSON.stringify(fnArgs, null, 2)
+                            : String(fnArgs);
+
+                        return (
+                          <div key={idx} className="pt-2.5 first:pt-0 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-amber-300 font-bold flex items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-[11px]">
+                                  {fnName}
+                                </span>
+                                {tc?.id && (
+                                  <span className="text-[10px] text-slate-500 font-normal">
+                                    ID: {tc.id}
+                                  </span>
+                                )}
+                              </span>
+                              <button
+                                onClick={() => handleCopy(argsStr, `tc-${idx}`)}
+                                className="text-slate-400 hover:text-amber-300 flex items-center gap-1 text-[11px]"
+                              >
+                                {copiedKey === `tc-${idx}` ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                                {copiedKey === `tc-${idx}` ? "已复制" : "复制参数"}
+                              </button>
+                            </div>
+                            <pre className="bg-slate-900 p-2.5 rounded-lg font-mono text-[11px] text-slate-200 overflow-x-auto border border-slate-800">
+                              {argsStr}
+                            </pre>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 卡片 4: Reasoning Content 思维链 (支持独立折叠) */}
               {payloadData?.response?.reasoning_content && (
