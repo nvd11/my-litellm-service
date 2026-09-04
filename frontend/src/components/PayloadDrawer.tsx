@@ -152,26 +152,26 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   if (!log) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/60 backdrop-blur-sm flex justify-end">
+    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/40 backdrop-blur-xs flex justify-end">
       {/* 背景蒙版点击关闭 */}
       <div className="flex-1" onClick={onClose} />
 
       {/* 右侧滑动面板 */}
-      <div className="w-full max-w-2xl bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
+      <div className="w-full max-w-2xl bg-white border-l border-slate-200 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
         {/* Drawer 顶栏 */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-850/70">
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 报文深度透视
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-purple-300 border border-slate-700">
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
                   {log.model_used}
                 </span>
               </h2>
-              <p className="text-xs text-slate-400 font-mono">ID: {log.request_id}</p>
+              <p className="text-xs text-slate-500 font-mono">ID: {log.request_id}</p>
             </div>
           </div>
 
@@ -180,14 +180,14 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
               href={log.prompt_url}
               target="_blank"
               rel="noreferrer"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
               title="在浏览器中直接打开 S3 原始 JSON"
             >
               <ExternalLink className="w-4 h-4" />
             </a>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -195,14 +195,14 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
         </div>
 
         {/* Tab 导航与快速折叠按钮 */}
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 bg-slate-900 text-xs font-semibold">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 bg-white text-xs font-semibold">
           <div className="flex">
             <button
               onClick={() => setActiveTab("formatted")}
               className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
                 activeTab === "formatted"
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-slate-400 hover:text-slate-200"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
               }`}
             >
               <Layers className="w-3.5 h-3.5" /> 结构化视图
@@ -211,8 +211,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
               onClick={() => setActiveTab("raw")}
               className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
                 activeTab === "raw"
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-slate-400 hover:text-slate-200"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
               }`}
             >
               <Code2 className="w-3.5 h-3.5" /> 原始 JSON 报文
@@ -221,8 +221,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
               onClick={() => setActiveTab("meta")}
               className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all ${
                 activeTab === "meta"
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-slate-400 hover:text-slate-200"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
               }`}
             >
               <Info className="w-3.5 h-3.5" /> 调用元数据
@@ -231,17 +231,17 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
           {/* 全局全部折叠 / 全部展开快捷按钮 */}
           {activeTab === "formatted" && (
-            <div className="flex items-center gap-2 text-[11px] font-normal text-slate-400">
+            <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
               <button
                 onClick={expandAll}
-                className="hover:text-blue-400 flex items-center gap-0.5"
+                className="hover:text-blue-600 flex items-center gap-0.5"
               >
                 <ChevronDown className="w-3 h-3" /> 全部展开
               </button>
               <span>|</span>
               <button
                 onClick={collapseAll}
-                className="hover:text-blue-400 flex items-center gap-0.5"
+                className="hover:text-blue-600 flex items-center gap-0.5"
               >
                 <ChevronUp className="w-3 h-3" /> 全部收起
               </button>
@@ -260,15 +260,15 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             <div className="space-y-3.5">
               {/* 卡片 1: System Prompt (支持独立折叠) */}
               {payloadData?.prompt?.system_prompt && (
-                <div className="bg-purple-950/20 border border-purple-800/40 rounded-xl overflow-hidden transition-all">
+                <div className="bg-purple-50/70 border border-purple-200 rounded-xl overflow-hidden shadow-2xs transition-all">
                   <div
                     onClick={() => toggleCollapse("system")}
-                    className="p-3 bg-purple-950/30 flex items-center justify-between text-purple-400 font-semibold cursor-pointer hover:bg-purple-900/20 transition-colors select-none"
+                    className="p-3 bg-purple-100/60 flex items-center justify-between text-purple-900 font-semibold cursor-pointer hover:bg-purple-100/80 transition-colors select-none"
                   >
                     <span className="flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5" /> System Prompt (人设与系统指令)
+                      <Shield className="w-3.5 h-3.5 text-purple-700" /> System Prompt (人设与系统指令)
                       {collapsed["system"] && (
-                        <span className="text-[10px] text-purple-300/70 font-normal ml-2 truncate max-w-[200px]">
+                        <span className="text-[10px] text-purple-700/70 font-normal ml-2 truncate max-w-[200px]">
                           {renderContent(payloadData.prompt.system_prompt).slice(0, 30)}...
                         </span>
                       )}
@@ -278,10 +278,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                         onClick={() =>
                           handleCopy(renderContent(payloadData.prompt.system_prompt), "system")
                         }
-                        className="text-slate-400 hover:text-purple-300 flex items-center gap-1 p-1 rounded"
+                        className="text-slate-500 hover:text-purple-900 flex items-center gap-1 p-1 rounded font-medium"
                       >
                         {copiedKey === "system" ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
+                          <Check className="w-3 h-3 text-emerald-600" />
                         ) : (
                           <Copy className="w-3 h-3" />
                         )}
@@ -289,7 +289,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       </button>
                       <button
                         onClick={() => toggleCollapse("system")}
-                        className="text-purple-400 hover:text-purple-200 p-1"
+                        className="text-purple-700 hover:text-purple-900 p-1"
                       >
                         {collapsed["system"] ? (
                           <ChevronDown className="w-4 h-4" />
@@ -300,7 +300,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     </div>
                   </div>
                   {!collapsed["system"] && (
-                    <div className="p-3 bg-slate-950/70 text-slate-300 whitespace-pre-wrap leading-relaxed font-sans border-t border-purple-900/30">
+                    <div className="p-3 bg-white text-slate-800 whitespace-pre-wrap leading-relaxed font-sans border-t border-purple-200/70">
                       {renderContent(payloadData.prompt.system_prompt)}
                     </div>
                   )}
@@ -308,15 +308,15 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
               )}
 
               {/* 卡片 2: User Prompt (支持独立折叠) */}
-              <div className="bg-blue-950/20 border border-blue-800/40 rounded-xl overflow-hidden transition-all">
+              <div className="bg-blue-50/70 border border-blue-200 rounded-xl overflow-hidden shadow-2xs transition-all">
                 <div
                   onClick={() => toggleCollapse("user")}
-                  className="p-3 bg-blue-950/30 flex items-center justify-between text-blue-400 font-semibold cursor-pointer hover:bg-blue-900/20 transition-colors select-none"
+                  className="p-3 bg-blue-100/60 flex items-center justify-between text-blue-900 font-semibold cursor-pointer hover:bg-blue-100/80 transition-colors select-none"
                 >
                   <span className="flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5" /> User Prompt (本次最新提问)
+                    <User className="w-3.5 h-3.5 text-blue-700" /> User Prompt (本次最新提问)
                     {collapsed["user"] && payloadData?.prompt?.user_prompt && (
-                      <span className="text-[10px] text-blue-300/70 font-normal ml-2 truncate max-w-[200px]">
+                      <span className="text-[10px] text-blue-700/70 font-normal ml-2 truncate max-w-[200px]">
                         {renderContent(payloadData.prompt.user_prompt).slice(0, 30)}...
                       </span>
                     )}
@@ -329,10 +329,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                           "user"
                         )
                       }
-                      className="text-slate-400 hover:text-blue-300 flex items-center gap-1 p-1 rounded"
+                      className="text-slate-500 hover:text-blue-900 flex items-center gap-1 p-1 rounded font-medium"
                     >
                       {copiedKey === "user" ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
+                        <Check className="w-3 h-3 text-emerald-600" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
@@ -340,7 +340,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     </button>
                     <button
                       onClick={() => toggleCollapse("user")}
-                      className="text-blue-400 hover:text-blue-200 p-1"
+                      className="text-blue-700 hover:text-blue-900 p-1"
                     >
                       {collapsed["user"] ? (
                         <ChevronDown className="w-4 h-4" />
@@ -351,22 +351,22 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   </div>
                 </div>
                 {!collapsed["user"] && (
-                  <div className="p-3 bg-slate-950/70 text-slate-200 whitespace-pre-wrap leading-relaxed font-sans border-t border-blue-900/30 font-medium">
+                  <div className="p-3 bg-white text-slate-900 whitespace-pre-wrap leading-relaxed font-sans border-t border-blue-200/70 font-medium">
                     {renderContent(payloadData?.prompt?.user_prompt) || "（无最新单独用户输入）"}
                   </div>
                 )}
               </div>
 
               {/* 卡片 3: Assistant Reply (支持独立折叠) */}
-              <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl overflow-hidden transition-all">
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl overflow-hidden shadow-2xs transition-all">
                 <div
                   onClick={() => toggleCollapse("reply")}
-                  className="p-3 bg-emerald-950/30 flex items-center justify-between text-emerald-400 font-semibold cursor-pointer hover:bg-emerald-900/20 transition-colors select-none"
+                  className="p-3 bg-emerald-100/60 flex items-center justify-between text-emerald-900 font-semibold cursor-pointer hover:bg-emerald-100/80 transition-colors select-none"
                 >
                   <span className="flex items-center gap-1.5">
-                    <Bot className="w-3.5 h-3.5" /> Assistant Reply (模型生成回复)
+                    <Bot className="w-3.5 h-3.5 text-emerald-700" /> Assistant Reply (模型生成回复)
                     {collapsed["reply"] && payloadData?.response?.reply && (
-                      <span className="text-[10px] text-emerald-300/70 font-normal ml-2 truncate max-w-[200px]">
+                      <span className="text-[10px] text-emerald-700/70 font-normal ml-2 truncate max-w-[200px]">
                         {renderContent(payloadData.response.reply).slice(0, 30)}...
                       </span>
                     )}
@@ -379,10 +379,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                           "reply"
                         )
                       }
-                      className="text-slate-400 hover:text-emerald-300 flex items-center gap-1 p-1 rounded"
+                      className="text-slate-500 hover:text-emerald-900 flex items-center gap-1 p-1 rounded font-medium"
                     >
                       {copiedKey === "reply" ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
+                        <Check className="w-3 h-3 text-emerald-600" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
@@ -390,7 +390,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     </button>
                     <button
                       onClick={() => toggleCollapse("reply")}
-                      className="text-emerald-400 hover:text-emerald-200 p-1"
+                      className="text-emerald-700 hover:text-emerald-900 p-1"
                     >
                       {collapsed["reply"] ? (
                         <ChevronDown className="w-4 h-4" />
@@ -401,7 +401,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   </div>
                 </div>
                 {!collapsed["reply"] && (
-                  <div className="p-3 bg-slate-950/70 text-slate-100 whitespace-pre-wrap leading-relaxed font-sans border-t border-emerald-900/30">
+                  <div className="p-3 bg-white text-slate-800 whitespace-pre-wrap leading-relaxed font-sans border-t border-emerald-200/70">
                     {renderContent(payloadData?.response?.reply) || (
                       <span className="text-slate-500 italic">
                         {payloadData?.response?.tool_calls && payloadData.response.tool_calls.length > 0
@@ -417,21 +417,21 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
               {/* 卡片 3.5: Tool Calls (工具调用与参数详情) */}
               {payloadData?.response?.tool_calls && payloadData.response.tool_calls.length > 0 && (
-                <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden transition-all">
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl overflow-hidden shadow-2xs transition-all">
                   <div
                     onClick={() => toggleCollapse("tool_calls")}
-                    className="p-3 bg-amber-950/30 flex items-center justify-between text-amber-400 font-semibold cursor-pointer hover:bg-amber-900/20 transition-colors select-none"
+                    className="p-3 bg-amber-100/60 flex items-center justify-between text-amber-900 font-semibold cursor-pointer hover:bg-amber-100/80 transition-colors select-none"
                   >
                     <span className="flex items-center gap-1.5">
-                      <Wrench className="w-3.5 h-3.5 text-amber-400" />
+                      <Wrench className="w-3.5 h-3.5 text-amber-700" />
                       Tool Calls (工具调用与参数)
-                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono border border-amber-500/30">
+                      <span className="px-1.5 py-0.2 rounded bg-amber-200/60 text-amber-900 text-[10px] font-mono border border-amber-300 font-bold">
                         {payloadData.response.tool_calls.length} 个工具
                       </span>
                     </span>
                     <button
                       onClick={() => toggleCollapse("tool_calls")}
-                      className="text-amber-400 hover:text-amber-200 p-1"
+                      className="text-amber-700 hover:text-amber-900 p-1"
                     >
                       {collapsed["tool_calls"] ? (
                         <ChevronDown className="w-4 h-4" />
@@ -441,7 +441,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     </button>
                   </div>
                   {!collapsed["tool_calls"] && (
-                    <div className="p-3 bg-slate-950/70 divide-y divide-slate-800/60 space-y-3 border-t border-amber-900/30">
+                    <div className="p-3 bg-white divide-y divide-slate-100 space-y-3 border-t border-amber-200/70">
                       {payloadData.response.tool_calls.map((tc: any, idx: number) => {
                         const fnName = tc?.function?.name || tc?.name || "未知工具";
                         let fnArgs = tc?.function?.arguments || tc?.arguments || {};
@@ -460,8 +460,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                         return (
                           <div key={idx} className="pt-2.5 first:pt-0 space-y-1.5">
                             <div className="flex items-center justify-between">
-                              <span className="font-mono text-amber-300 font-bold flex items-center gap-1.5">
-                                <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-[11px]">
+                              <span className="font-mono text-amber-800 font-bold flex items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded bg-amber-100 border border-amber-300 text-[11px]">
                                   {fnName}
                                 </span>
                                 {tc?.id && (
@@ -472,17 +472,17 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                               </span>
                               <button
                                 onClick={() => handleCopy(argsStr, `tc-${idx}`)}
-                                className="text-slate-400 hover:text-amber-300 flex items-center gap-1 text-[11px]"
+                                className="text-slate-500 hover:text-amber-900 flex items-center gap-1 text-[11px] font-medium"
                               >
                                 {copiedKey === `tc-${idx}` ? (
-                                  <Check className="w-3 h-3 text-emerald-400" />
+                                  <Check className="w-3 h-3 text-emerald-600" />
                                 ) : (
                                   <Copy className="w-3 h-3" />
                                 )}
                                 {copiedKey === `tc-${idx}` ? "已复制" : "复制参数"}
                               </button>
                             </div>
-                            <pre className="bg-slate-900 p-2.5 rounded-lg font-mono text-[11px] text-slate-200 overflow-x-auto border border-slate-800">
+                            <pre className="bg-slate-900 p-2.5 rounded-lg font-mono text-[11px] text-slate-100 overflow-x-auto border border-slate-800">
                               {argsStr}
                             </pre>
                           </div>
@@ -495,15 +495,15 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
               {/* 卡片 4: Reasoning Content 思维链 (支持独立折叠) */}
               {payloadData?.response?.reasoning_content && (
-                <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden transition-all">
+                <div className="bg-orange-50/70 border border-orange-200 rounded-xl overflow-hidden shadow-2xs transition-all">
                   <div
                     onClick={() => toggleCollapse("reasoning")}
-                    className="p-3 bg-amber-950/30 flex items-center justify-between text-amber-400 font-semibold cursor-pointer hover:bg-amber-900/20 transition-colors select-none"
+                    className="p-3 bg-orange-100/60 flex items-center justify-between text-orange-900 font-semibold cursor-pointer hover:bg-orange-100/80 transition-colors select-none"
                   >
                     <span className="flex items-center gap-1.5">
-                      <Brain className="w-3.5 h-3.5" /> Reasoning Process (思维链与思考过程)
+                      <Brain className="w-3.5 h-3.5 text-orange-700" /> Reasoning Process (思维链与思考过程)
                       {collapsed["reasoning"] && (
-                        <span className="text-[10px] text-amber-300/70 font-normal ml-2 truncate max-w-[200px]">
+                        <span className="text-[10px] text-orange-700/70 font-normal ml-2 truncate max-w-[200px]">
                           {renderContent(payloadData.response.reasoning_content).slice(0, 30)}...
                         </span>
                       )}
@@ -516,10 +516,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                             "reasoning"
                           )
                         }
-                        className="text-slate-400 hover:text-amber-300 flex items-center gap-1 p-1 rounded"
+                        className="text-slate-500 hover:text-orange-900 flex items-center gap-1 p-1 rounded font-medium"
                       >
                         {copiedKey === "reasoning" ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
+                          <Check className="w-3 h-3 text-emerald-600" />
                         ) : (
                           <Copy className="w-3 h-3" />
                         )}
@@ -527,7 +527,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       </button>
                       <button
                         onClick={() => toggleCollapse("reasoning")}
-                        className="text-amber-400 hover:text-amber-200 p-1"
+                        className="text-orange-700 hover:text-orange-900 p-1"
                       >
                         {collapsed["reasoning"] ? (
                           <ChevronDown className="w-4 h-4" />
@@ -538,7 +538,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                     </div>
                   </div>
                   {!collapsed["reasoning"] && (
-                    <div className="p-3 bg-slate-950/70 text-amber-200/90 whitespace-pre-wrap leading-relaxed font-mono text-[11px] border-t border-amber-900/30 max-h-60 overflow-y-auto">
+                    <div className="p-3 bg-white text-orange-950 whitespace-pre-wrap leading-relaxed font-mono text-[11px] border-t border-orange-200/70 max-h-60 overflow-y-auto">
                       {renderContent(payloadData.response.reasoning_content)}
                     </div>
                   )}
@@ -547,22 +547,22 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
               {/* 卡片 5: 多轮对话上下文时序 (支持整卡折叠 + 每条消息单项折叠) */}
               {payloadData?.prompt?.messages && payloadData.prompt.messages.length > 0 && (
-                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900">
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
                   <div
                     onClick={() => toggleCollapse("messages")}
-                    className="p-3 bg-slate-850 flex items-center justify-between text-slate-300 font-semibold cursor-pointer hover:bg-slate-800 transition-colors select-none"
+                    className="p-3 bg-slate-100 flex items-center justify-between text-slate-800 font-semibold cursor-pointer hover:bg-slate-200/60 transition-colors select-none"
                   >
                     <span className="flex items-center gap-1.5">
-                      <ChevronsUpDown className="w-3.5 h-3.5 text-blue-400" />
+                      <ChevronsUpDown className="w-3.5 h-3.5 text-blue-600" />
                       多轮对话上下文列表 ({payloadData.prompt.messages.length} 条消息)
                     </span>
-                    <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                    <span className="text-slate-500 text-[11px] flex items-center gap-1 font-medium">
                       {collapsed["messages"] ? "展开 ▼" : "收起 ▲"}
                     </span>
                   </div>
 
                   {!collapsed["messages"] && (
-                    <div className="p-3 bg-slate-950/60 divide-y divide-slate-800/60 space-y-2.5">
+                    <div className="p-3 bg-slate-50/60 divide-y divide-slate-200/60 space-y-2.5">
                       {payloadData.prompt.messages.map((m, idx) => {
                         const msgKey = `msg-${idx}`;
                         const isMsgCollapsed = collapsed[msgKey];
@@ -577,10 +577,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                                 <span
                                   className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-mono ${
                                     m.role === "system"
-                                      ? "bg-purple-900/30 text-purple-400"
+                                      ? "bg-purple-100 text-purple-800 border border-purple-200"
                                       : m.role === "user"
-                                      ? "bg-blue-900/30 text-blue-400"
-                                      : "bg-emerald-900/30 text-emerald-400"
+                                      ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                      : "bg-emerald-100 text-emerald-800 border border-emerald-200"
                                   }`}
                                 >
                                   {m.role}
@@ -589,22 +589,22 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                                   #{idx + 1}
                                 </span>
                                 {isMsgCollapsed && (
-                                  <span className="text-[10px] text-slate-400 font-normal truncate max-w-[280px]">
+                                  <span className="text-[10px] text-slate-500 font-normal truncate max-w-[280px]">
                                     {renderContent(m.content).slice(0, 40)}...
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-1.5 text-slate-500 group-hover:text-slate-300">
+                              <div className="flex items-center gap-1.5 text-slate-500 group-hover:text-slate-800">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleCopy(renderContent(m.content), msgKey);
                                   }}
-                                  className="hover:text-blue-400 p-0.5"
+                                  className="hover:text-blue-600 p-0.5"
                                   title="复制此条"
                                 >
                                   {copiedKey === msgKey ? (
-                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <Check className="w-3 h-3 text-emerald-600" />
                                   ) : (
                                     <Copy className="w-3 h-3" />
                                   )}
@@ -619,7 +619,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
                             {/* 单条消息正文 */}
                             {!isMsgCollapsed && (
-                              <div className="text-slate-300 whitespace-pre-wrap font-sans pl-1.5 text-[11px] leading-relaxed bg-slate-900/50 p-2 rounded-lg border border-slate-850">
+                              <div className="text-slate-800 whitespace-pre-wrap font-sans pl-1.5 text-[11px] leading-relaxed bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
                                 {renderContent(m.content)}
                               </div>
                             )}
@@ -633,7 +633,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                           <button
                             onClick={fetchFullPayload}
                             disabled={loadingFull}
-                            className="w-full py-2 px-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-center font-medium transition-all disabled:opacity-50"
+                            className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-center font-medium transition-all disabled:opacity-50"
                           >
                             {loadingFull
                               ? "正在从 NUC MinIO 传输千条全量报文..."
@@ -654,8 +654,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   onClick={() => setRawTab("prompt")}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
                     rawTab === "prompt"
-                      ? "bg-blue-600 border-blue-500 text-white"
-                      : "bg-slate-800 border-slate-700 text-slate-400"
+                      ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                      : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
                   📄 prompt.json
@@ -664,8 +664,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   onClick={() => setRawTab("response")}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${
                     rawTab === "response"
-                      ? "bg-blue-600 border-blue-500 text-white"
-                      : "bg-slate-800 border-slate-700 text-slate-400"
+                      ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+                      : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
                   📄 response.json
@@ -685,7 +685,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       "raw_json"
                     )
                   }
-                  className="absolute right-3 top-3 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center gap-1"
+                  className="absolute right-3 top-3 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center gap-1 shadow-sm"
                 >
                   {copiedKey === "raw_json" ? (
                     <Check className="w-3 h-3 text-emerald-400" />
@@ -694,7 +694,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   )}
                   {copiedKey === "raw_json" ? "已复制" : "复制代码"}
                 </button>
-                <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] font-mono text-slate-300 leading-relaxed max-h-[550px]">
+                <pre className="bg-slate-900 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] font-mono text-slate-100 leading-relaxed max-h-[550px]">
                   {JSON.stringify(
                     rawTab === "prompt" ? payloadData?.prompt : payloadData?.response,
                     null,
@@ -705,43 +705,43 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             </div>
           ) : (
             /* 元数据 Tab */
-            <div className="space-y-3 bg-slate-950/60 rounded-xl p-4 border border-slate-800">
+            <div className="space-y-3 bg-slate-50 rounded-xl p-4 border border-slate-200 shadow-2xs">
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-500 block">请求时间</span>
-                  <span className="font-mono text-slate-200">{log.created_at}</span>
+                  <span className="text-slate-500 font-medium block">请求时间</span>
+                  <span className="font-mono text-slate-800 font-semibold">{log.created_at}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">响应耗时</span>
-                  <span className="font-mono text-amber-300">{log.latency_ms} ms</span>
+                  <span className="text-slate-500 font-medium block">响应耗时</span>
+                  <span className="font-mono text-amber-600 font-semibold">{log.latency_ms} ms</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">调用方 Key 别名</span>
-                  <span className="font-semibold text-blue-400">{log.api_key_alias}</span>
+                  <span className="text-slate-500 font-medium block">调用方 Key 别名</span>
+                  <span className="font-semibold text-blue-600">{log.api_key_alias}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">上游 Provider Key</span>
-                  <span className="font-mono text-slate-300">{log.provider_key_alias}</span>
+                  <span className="text-slate-500 font-medium block">上游 Provider Key</span>
+                  <span className="font-mono text-slate-700 font-semibold">{log.provider_key_alias}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">请求模型 vs 命中模型</span>
-                  <span className="font-mono text-purple-300">
+                  <span className="text-slate-500 font-medium block">请求模型 vs 命中模型</span>
+                  <span className="font-mono text-purple-700 font-semibold">
                     {log.model_requested} ➔ {log.model_used}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">结算汇率 (USD/CNY)</span>
-                  <span className="font-mono text-slate-200">{log.fx_rate}</span>
+                  <span className="text-slate-500 font-medium block">结算汇率 (USD/CNY)</span>
+                  <span className="font-mono text-slate-800 font-semibold">{log.fx_rate}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Token 消耗明细</span>
-                  <span className="font-mono text-slate-200">
+                  <span className="text-slate-500 font-medium block">Token 消耗明细</span>
+                  <span className="font-mono text-slate-800 font-semibold">
                     总计 {log.total_tokens} (Prompt: {log.prompt_tokens}, Completion: {log.completion_tokens})
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">本次扣费 (USD / CNY)</span>
-                  <span className="font-mono text-emerald-400 font-bold">
+                  <span className="text-slate-500 font-medium block">本次扣费 (USD / CNY)</span>
+                  <span className="font-mono text-emerald-600 font-bold">
                     ¥{log.cost_cny.toFixed(6)} (${log.cost_usd.toFixed(6)})
                   </span>
                 </div>

@@ -80,9 +80,9 @@ export const LogsTable: React.FC<LogsTableProps> = ({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
       {/* Table Toolbar & Filters */}
-      <div className="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+      <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-white">
         <div className="flex items-center flex-wrap gap-2.5 flex-1 min-w-[280px]">
           {/* Search Input */}
           <div className="relative flex-1 min-w-[200px]">
@@ -92,7 +92,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
               placeholder="搜索 Request ID / Key 别名 / 模型..."
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full bg-slate-800/80 border border-slate-700/80 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
             />
           </div>
 
@@ -100,7 +100,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
           <select
             value={selectedKeyAlias}
             onChange={(e) => onKeyAliasChange(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部 Key 别名</option>
             <option value="cindy">cindy</option>
@@ -113,7 +113,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
           <select
             value={selectedModel}
             onChange={(e) => onModelChange(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部模型</option>
             <option value="gemini-3.7-flash">gemini-3.7-flash</option>
@@ -124,7 +124,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
           <select
             value={selectedStatusCode}
             onChange={(e) => onStatusCodeChange(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部状态</option>
             <option value="200">200 OK</option>
@@ -134,15 +134,15 @@ export const LogsTable: React.FC<LogsTableProps> = ({
         </div>
 
         {/* Total Count Info */}
-        <div className="text-xs text-slate-400 font-medium">
-          共 <span className="text-slate-200 font-bold">{logsData?.total ?? 0}</span> 条记录
+        <div className="text-xs text-slate-500 font-medium">
+          共 <span className="text-slate-900 font-bold">{logsData?.total ?? 0}</span> 条记录
         </div>
       </div>
 
       {/* Table Content */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-850/60 text-slate-400 uppercase font-semibold border-b border-slate-800/80">
+          <thead className="bg-slate-50 text-slate-500 uppercase font-semibold border-b border-slate-200">
             <tr>
               <th className="py-3 px-4">触发时间</th>
               <th className="py-3 px-4">Request ID</th>
@@ -155,16 +155,16 @@ export const LogsTable: React.FC<LogsTableProps> = ({
               <th className="py-3 px-4 text-center">报文透视</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60 text-slate-300">
+          <tbody className="divide-y divide-slate-100 text-slate-700">
             {loading && !logsData?.items?.length ? (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-slate-500">
+                <td colSpan={9} className="py-12 text-center text-slate-400">
                   数据加载中...
                 </td>
               </tr>
             ) : !logsData?.items?.length ? (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-slate-500">
+                <td colSpan={9} className="py-12 text-center text-slate-400">
                   暂无匹配的调用日志
                 </td>
               </tr>
@@ -175,43 +175,43 @@ export const LogsTable: React.FC<LogsTableProps> = ({
                   <tr
                     key={log.id}
                     onClick={() => onSelectLog(log)}
-                    className={`cursor-pointer transition-colors hover:bg-slate-800/50 ${
-                      isSelected ? "bg-blue-900/20 border-l-2 border-blue-500" : ""
+                    className={`cursor-pointer transition-colors hover:bg-slate-50/90 ${
+                      isSelected ? "bg-blue-50/80 border-l-2 border-blue-500" : ""
                     }`}
                   >
-                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-400">
+                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-500">
                       {formatTime(log.created_at)}
                     </td>
-                    <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-200 font-medium">
-                      <span className="hover:underline text-blue-400">
+                    <td className="py-3 px-4 whitespace-nowrap font-mono font-medium">
+                      <span className="hover:underline text-blue-600">
                         {log.request_id.length > 20
                           ? log.request_id.slice(0, 10) + "..." + log.request_id.slice(-6)
                           : log.request_id}
                       </span>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold">
+                      <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 font-semibold">
                         {log.api_key_alias}
                       </span>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap font-mono">
-                      <span className="text-purple-400">{log.model_used}</span>
+                      <span className="text-purple-700 font-medium">{log.model_used}</span>
                       {log.model_requested !== log.model_used && (
-                        <span className="ml-1.5 text-[10px] text-amber-400 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20">
+                        <span className="ml-1.5 text-[10px] text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
                           降级自 {log.model_requested}
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-medium text-slate-200">
+                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-medium text-slate-800">
                       {log.total_tokens.toLocaleString()}
-                      <span className="text-[10px] text-slate-500 ml-1">
+                      <span className="text-[10px] text-slate-400 ml-1">
                         ({log.prompt_tokens}↑ {log.completion_tokens}↓)
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-semibold text-emerald-400">
+                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-semibold text-emerald-600">
                       ¥{log.cost_cny.toFixed(4)}
                     </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono text-amber-300">
+                    <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-medium text-amber-600">
                       {log.latency_ms}ms
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">{getStatusBadge(log.status_code)}</td>
@@ -221,7 +221,7 @@ export const LogsTable: React.FC<LogsTableProps> = ({
                           e.stopPropagation();
                           onSelectLog(log);
                         }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 text-xs font-medium transition-all"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-blue-600 border border-slate-200 text-xs font-medium transition-all shadow-sm"
                       >
                         <FileText className="w-3.5 h-3.5" /> 查看
                       </button>
@@ -236,23 +236,23 @@ export const LogsTable: React.FC<LogsTableProps> = ({
 
       {/* Pagination Bar */}
       {logsData && logsData.total_pages > 1 && (
-        <div className="p-3.5 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+        <div className="p-3.5 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 bg-white">
           <div>
-            第 <span className="font-semibold text-slate-200">{page}</span> /{" "}
-            <span className="font-semibold text-slate-200">{logsData.total_pages}</span> 页
+            第 <span className="font-semibold text-slate-800">{page}</span> /{" "}
+            <span className="font-semibold text-slate-800">{logsData.total_pages}</span> 页
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => onPageChange(page - 1)}
               disabled={page <= 1}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
             >
               <ChevronLeft className="w-3.5 h-3.5" /> 上一页
             </button>
             <button
               onClick={() => onPageChange(page + 1)}
               disabled={page >= logsData.total_pages}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
             >
               下一页 <ChevronRight className="w-3.5 h-3.5" />
             </button>
