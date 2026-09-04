@@ -7,7 +7,7 @@ from typing import Any
 
 import aioboto3
 from botocore.config import Config
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -65,8 +65,8 @@ async def get_request_payload(
 
     session = aioboto3.Session()
     boto_config = Config(
-        connect_timeout=settings.payload_upload_timeout_seconds,
-        read_timeout=settings.payload_upload_timeout_seconds,
+        connect_timeout=5.0,
+        read_timeout=5.0,
         retries={"max_attempts": 2},
     )
 
@@ -91,7 +91,7 @@ async def get_request_payload(
                 prompt_data = json.loads(prompt_bytes.decode("utf-8"))
             except Exception as e:
                 logger.debug("Prompt payload not found in S3 for %s: %s", request_id, e)
-                prompt_data = {"error": "Prompt payload not available in S3"}
+                prompt_data = {"user_prompt": "（此历史调用的原始输入报文未在 MinIO 归档）"}
 
             # 尝试拉取 response.json
             try:
@@ -103,10 +103,11 @@ async def get_request_payload(
                 response_data = json.loads(resp_bytes.decode("utf-8"))
             except Exception as e:
                 logger.debug("Response payload not found in S3 for %s: %s", request_id, e)
-                response_data = {"error": "Response payload not available in S3"}
+                response_data = {"reply": "（此历史调用的原始模型回复未在 MinIO 归档）"}
     except Exception as exc:
         logger.warning("Failed to connect to S3 to read payload for %s: %s", request_id, exc)
-        raise HTTPException(status_code=502, detail=f"S3 storage unreachable: {exc}") from exc
+        prompt_data = {"user_prompt": f"（S3 存储节点响应超时或暂时离线: {exc}）"}
+        response_data = {"reply": "（无法从 NUC MinIO 读取回复报文）"}
 
     return PayloadInspectionResponse(
         request_id=request_id,

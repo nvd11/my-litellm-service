@@ -41,18 +41,32 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
     const fetchPayload = async () => {
       setLoading(true);
+      const dateStr = log.created_at.split("T")[0];
       try {
-        const dateStr = log.created_at.split("T")[0];
         const res = await fetch(`/api/v1/logs/${log.request_id}/payload?date=${dateStr}`);
         if (res.ok) {
           const data = await res.json();
           setPayloadData(data);
         } else {
-          setPayloadData(null);
+          setPayloadData({
+            request_id: log.request_id,
+            date: dateStr,
+            prompt: { user_prompt: `（读取报文失败：HTTP ${res.status}）` },
+            response: { reply: "（此请求的原始报文未在 MinIO 归档或为旧版本历史调用）" },
+            prompt_url: log.prompt_url,
+            response_url: log.response_url,
+          });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to load payload from API:", err);
-        setPayloadData(null);
+        setPayloadData({
+          request_id: log.request_id,
+          date: dateStr,
+          prompt: { user_prompt: `（网络连接异常：${err?.message || err}）` },
+          response: { reply: "（无法从服务器加载报文数据）" },
+          prompt_url: log.prompt_url,
+          response_url: log.response_url,
+        });
       } finally {
         setLoading(false);
       }
