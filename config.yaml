@@ -9,6 +9,23 @@
 
 model_list:
   # === 🟢 主力日常活跃组 (Google 原生 Key 3，完美支持 Responses API 与工具调用) ===
+  # Gemini 3.8 Flash - Key 3 (Google 官方原价: $0.75/1M Input, $3.75/1M Output)
+  - model_name: gemini-3.8-flash
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_3
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_3"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_3"
+
   # Gemini 3.7 Flash - Key 3 (Google 官方原价: $0.75/1M Input, $3.75/1M Output)
   - model_name: gemini-3.7-flash
     litellm_params:
@@ -61,6 +78,7 @@ router_settings:
   cooldown_time: 60
 
   fallbacks:
+    - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.7-backup"]
     - gemini-3.7-flash: ["gemini-3.7-backup"]
 
 litellm_settings:
