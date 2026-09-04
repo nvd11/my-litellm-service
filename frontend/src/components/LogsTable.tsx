@@ -158,19 +158,20 @@ export const LogsTable: React.FC<LogsTableProps> = ({
               <th className="py-3 px-4 text-right">折合人民币</th>
               <th className="py-3 px-4 text-right">耗时</th>
               <th className="py-3 px-4">状态</th>
+              <th className="py-3 px-4 min-w-[150px]">异常详情</th>
               <th className="py-3 px-4 text-center">报文透视</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {loading && !logsData?.items?.length ? (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-slate-400">
+                <td colSpan={10} className="py-12 text-center text-slate-400">
                   数据加载中...
                 </td>
               </tr>
             ) : !logsData?.items?.length ? (
               <tr>
-                <td colSpan={9} className="py-12 text-center text-slate-400">
+                <td colSpan={10} className="py-12 text-center text-slate-400">
                   暂无匹配的调用日志
                 </td>
               </tr>
@@ -221,6 +222,25 @@ export const LogsTable: React.FC<LogsTableProps> = ({
                       {log.latency_ms}ms
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">{getStatusBadge(log.status_code, log.error_msg)}</td>
+                    <td className="py-3 px-4 max-w-[200px]">
+                      {log.error_msg ? (
+                        <span
+                          title={log.error_msg}
+                          className="truncate block text-rose-600 font-mono text-[11px] hover:underline cursor-help"
+                        >
+                          {log.error_msg}
+                        </span>
+                      ) : log.status_code !== 200 ? (
+                        <span
+                          title={`HTTP ${log.status_code} 未返回详细异常文本`}
+                          className="text-rose-400 font-mono text-[11px] truncate block"
+                        >
+                          HTTP {log.status_code}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 font-mono">-</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4 text-center whitespace-nowrap">
                       <button
                         onClick={(e) => {
