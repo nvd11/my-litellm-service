@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +18,9 @@ app = FastAPI(
     description="Enterprise observability metrics, audit logs, and payload inspection for LiteLLM.",
     version="1.0.0",
 )
+
+# 开启 Gzip 传输压缩，大幅减少网络传输耗时
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 配置 CORS 允许跨域（本地开发时支持 Vite 本地调试端口）
 app.add_middleware(

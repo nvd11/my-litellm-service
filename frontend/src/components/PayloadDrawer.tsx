@@ -28,10 +28,28 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   const [rawTab, setRawTab] = useState<"prompt" | "response">("prompt");
   const [payloadData, setPayloadData] = useState<PayloadData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadingFull, setLoadingFull] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // 折叠控制状态：key 为 section 名称或 "msg-{index}"，value 为 true 表示已收起/折叠
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const fetchFullPayload = async () => {
+    if (!log) return;
+    setLoadingFull(true);
+    const dateStr = log.created_at.split("T")[0];
+    try {
+      const res = await fetch(`/api/v1/logs/${log.request_id}/payload?date=${dateStr}&full=true`);
+      if (res.ok) {
+        const data = await res.json();
+        setPayloadData(data);
+      }
+    } catch (err) {
+      console.error("Failed to load full payload:", err);
+    } finally {
+      setLoadingFull(false);
+    }
+  };
 
   useEffect(() => {
     if (!log) {
@@ -527,6 +545,21 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                           </div>
                         );
                       })}
+
+                      {/* 超长对话一键加载全量按钮 */}
+                      {(payloadData?.prompt as any)?.is_truncated && (
+                        <div className="pt-2 text-center">
+                          <button
+                            onClick={fetchFullPayload}
+                            disabled={loadingFull}
+                            className="w-full py-2 px-3 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-lg text-center font-medium transition-all disabled:opacity-50"
+                          >
+                            {loadingFull
+                              ? "正在从 NUC MinIO 传输千条全量报文..."
+                              : `⚡ 当前为秒开精简预览，点击加载完整全部 ${(payloadData?.prompt as any)?.total_messages_count} 条历史消息`}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

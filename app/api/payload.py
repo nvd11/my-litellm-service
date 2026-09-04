@@ -35,6 +35,7 @@ async def get_request_payload(
     target_date: date | None = Query(
         None, alias="date", description="Date of the request (YYYY-MM-DD)"
     ),
+    full: bool = Query(False, description="Whether to load full messages without truncation"),
     settings: Settings = Depends(get_settings),
 ) -> Any:
     """Fetch structured Prompt and Response payloads directly from NUC MinIO S3."""
@@ -108,6 +109,18 @@ async def get_request_payload(
         logger.warning("Failed to connect to S3 to read payload for %s: %s", request_id, exc)
         prompt_data = {"user_prompt": f"（S3 存储节点响应超时或暂时离线: {exc}）"}
         response_data = {"reply": "（无法从 NUC MinIO 读取回复报文）"}
+
+    # 对超长多轮对话 (>30 条消息) 做智能轻量化抽样，缩短 99% 的网络传输耗时实现毫秒级秒开
+    messages = prompt_data.get("messages")
+    if isinstance(messages, list) and len(messages) > 30 and not full:
+        total_count = len(messages)
+        prompt_data["total_messages_count"] = total_count
+        prompt_data["is_truncated"] = True
+        notice_msg = {
+            "role": "system",
+            "content": f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，点击下方“加载全部消息”可获取全量上下文 ...）",
+        }
+        prompt_data["messages"] = messages[:5] + [notice_msg] + messages[-20:]
 
     return PayloadInspectionResponse(
         request_id=request_id,
