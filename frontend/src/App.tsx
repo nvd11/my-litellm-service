@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   // Logs Table State
   const [logsData, setLogsData] = useState<PaginatedLogsResponse | null>(null);
   const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(20);
   const [searchKeyword, setSearchKeyword] = useState<string>("");
   const [selectedKeyAlias, setSelectedKeyAlias] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -63,7 +64,7 @@ export const App: React.FC = () => {
       setLoading(true);
       const params = new URLSearchParams({
         page: page.toString(),
-        page_size: "20",
+        page_size: pageSize.toString(),
         start_date: selectedDate,
         end_date: selectedDate,
       });
@@ -91,7 +92,7 @@ export const App: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
+  }, [page, pageSize, selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
 
   // Initial load and auto refresh
   useEffect(() => {
@@ -148,6 +149,11 @@ export const App: React.FC = () => {
           loading={loading}
           page={page}
           onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
           searchKeyword={searchKeyword}
           onSearchChange={(s) => {
             setSearchKeyword(s);

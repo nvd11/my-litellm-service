@@ -15,6 +15,8 @@ interface LogsTableProps {
   loading: boolean;
   page: number;
   onPageChange: (page: number) => void;
+  pageSize: number;
+  onPageSizeChange: (size: number) => void;
   searchKeyword: string;
   onSearchChange: (val: string) => void;
   selectedKeyAlias: string;
@@ -32,6 +34,8 @@ export const LogsTable: React.FC<LogsTableProps> = ({
   loading,
   page,
   onPageChange,
+  pageSize,
+  onPageSizeChange,
   searchKeyword,
   onSearchChange,
   selectedKeyAlias,
@@ -264,11 +268,29 @@ export const LogsTable: React.FC<LogsTableProps> = ({
       </div>
 
       {/* Pagination Bar */}
-      {logsData && logsData.total_pages > 1 && (
+      {logsData && (
         <div className="p-3.5 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 bg-white">
-          <div>
-            第 <span className="font-semibold text-slate-800">{page}</span> /{" "}
-            <span className="font-semibold text-slate-800">{logsData.total_pages}</span> 页
+          <div className="flex items-center gap-3">
+            {/* Page Size Selector */}
+            <div className="flex items-center gap-1.5">
+              <span>每页</span>
+              <select
+                value={pageSize}
+                onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
+              >
+                {[10, 20, 30, 40, 50, 100].map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+              <span>条</span>
+            </div>
+            <div>
+              第 <span className="font-semibold text-slate-800">{page}</span> /{" "}
+              <span className="font-semibold text-slate-800">{logsData.total_pages}</span> 页
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
