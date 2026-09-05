@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     openai_api_key_free_3: SecretStr | None = None
     openai_api_key_pro_plan: SecretStr | None = None
     a6_api_key: SecretStr | None = None
+    meta_api_key: SecretStr | None = None
 
     litellm_master_key: SecretStr
     litellm_port: int = 4000

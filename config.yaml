@@ -98,6 +98,42 @@ model_list:
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
+  # === 🌕 GPT-5.6 Luna 轻量编程推理模型 (A6 API - 2026-09-05 实测: $0.0096/1M, 约 ¥0.07/1M) ===
+  - model_name: gpt-5.6-luna-a6
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_base: https://api.a6api.com/v1
+      api_key: os.environ/A6_API_KEY
+      input_cost_per_token: 0.0000000096
+      output_cost_per_token: 0.0000000096
+      rpm: 60
+      metadata:
+        provider: "a6api.com"
+        provider_key_alias: "A6_API_KEY"
+    model_info:
+      input_cost_per_token: 0.0000000096
+      output_cost_per_token: 0.0000000096
+      provider: "a6api.com"
+      provider_key_alias: "A6_API_KEY"
+
+  # === 🌕 GPT-5.6 Luna 轻量编程推理模型 (元衡 API 优质组 - 档案价: ¥0.27/1M, 约 $0.0373/1M) ===
+  - model_name: gpt-5.6-luna-yuanheng
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_base: https://cn.meta-api.vip/v1
+      api_key: os.environ/META_API_KEY
+      input_cost_per_token: 0.0000000373
+      output_cost_per_token: 0.0000000373
+      rpm: 60
+      metadata:
+        provider: "cn.meta-api.vip"
+        provider_key_alias: "META_API_KEY"
+    model_info:
+      input_cost_per_token: 0.0000000373
+      output_cost_per_token: 0.0000000373
+      provider: "cn.meta-api.vip"
+      provider_key_alias: "META_API_KEY"
+
 router_settings:
   routing_strategy: "least-busy" # 负载均衡：优先选择当前空闲/负载最小的 Key 派发请求
 
@@ -116,6 +152,9 @@ router_settings:
   fallbacks:
     - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.8-backup"]
     - gemini-3.7-flash: ["gemini-3.8-backup"]
+    - kimi-k3: ["gpt-5.6-luna-a6"]
+    - gpt-5.6-luna-a6: ["gpt-5.6-luna-yuanheng"]
+    - gpt-5.6-luna-yuanheng: ["gpt-5.6-luna-a6"]
 
 litellm_settings:
   # 🎯 异步审计日志与汇率落库回调 (Phase 2 Custom Logger)
