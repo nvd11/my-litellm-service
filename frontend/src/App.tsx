@@ -31,10 +31,23 @@ export const App: React.FC = () => {
   // Drawer state
   const [selectedLog, setSelectedLog] = useState<LogItem | null>(null);
 
-  // Fetch metrics
+  // Fetch metrics (与日志表格保持一致的筛选条件, 确保汇总卡片与记录数对齐)
   const fetchMetrics = useCallback(async () => {
     try {
-      const res = await fetch(`/api/v1/metrics/summary?date=${selectedDate}`);
+      const params = new URLSearchParams({ date: selectedDate });
+      if (searchKeyword.trim()) {
+        params.append("search", searchKeyword.trim());
+      }
+      if (selectedKeyAlias.trim()) {
+        params.append("api_key_alias", selectedKeyAlias.trim());
+      }
+      if (selectedModel.trim()) {
+        params.append("model_used", selectedModel.trim());
+      }
+      if (selectedStatusCode.trim()) {
+        params.append("status_code", selectedStatusCode.trim());
+      }
+      const res = await fetch(`/api/v1/metrics/summary?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setMetrics(data);
@@ -42,7 +55,7 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error("Failed to fetch metrics:", err);
     }
-  }, [selectedDate]);
+  }, [selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
 
   // Fetch logs
   const fetchLogs = useCallback(async () => {
@@ -118,7 +131,16 @@ export const App: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
         {/* Metric Cards Banner */}
-        <MetricCards metrics={metrics} loading={loading} />
+        <MetricCards
+          metrics={metrics}
+          loading={loading}
+          hasActiveFilters={Boolean(
+            searchKeyword.trim() ||
+              selectedKeyAlias.trim() ||
+              selectedModel.trim() ||
+              selectedStatusCode.trim()
+          )}
+        />
 
         {/* Audit Logs Table */}
         <LogsTable

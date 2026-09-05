@@ -5,9 +5,11 @@ import { SummaryMetrics } from "../types";
 interface MetricCardsProps {
   metrics: SummaryMetrics | null;
   loading: boolean;
+  hasActiveFilters?: boolean;
 }
 
-export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading }) => {
+export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading, hasActiveFilters }) => {
+  const scopeLabel = hasActiveFilters ? "筛选调用量" : "今日调用总量";
   const formatTokens = (tokens: number) => {
     if (tokens >= 100_000_000) {
       const mVal = (tokens / 1_000_000).toFixed(2);
@@ -43,7 +45,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ metrics, loading }) =>
         {/* Card 1: Today Invocations */}
         <div className="bg-white border border-slate-200 rounded-xl p-4.5 shadow-sm hover:shadow hover:border-slate-300 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">今日调用总量</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{scopeLabel}</span>
             <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
               <MessageSquare className="w-4 h-4" />
             </div>
