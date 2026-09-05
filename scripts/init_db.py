@@ -61,12 +61,12 @@ SELECT
     l.error_msg,
     l.created_at,
     CONCAT(
-        'https://minio.jppwl.asia/litellm-payloads/',
+        'https://payloads.jppwl.asia/payloads/',
         DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
         l.request_id, '/prompt.json'
     ) AS prompt_url,
     CONCAT(
-        'https://minio.jppwl.asia/litellm-payloads/',
+        'https://payloads.jppwl.asia/payloads/',
         DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
         l.request_id, '/response.json'
     ) AS response_url

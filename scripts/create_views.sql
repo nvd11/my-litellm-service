@@ -30,13 +30,13 @@ SELECT
     l.created_at,
     -- 动态拼接 NUC MinIO S3 Prompt 输入报文直达超链接
     CONCAT(
-        'https://minio.jppwl.asia/litellm-payloads/',
+        'https://payloads.jppwl.asia/payloads/',
         DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
         l.request_id, '/prompt.json'
     ) AS prompt_url,
     -- 动态拼接 NUC MinIO S3 Response 输出报文直达超链接
     CONCAT(
-        'https://minio.jppwl.asia/litellm-payloads/',
+        'https://payloads.jppwl.asia/payloads/',
         DATE_FORMAT(l.created_at, '%Y-%m-%d'), '/',
         l.request_id, '/response.json'
     ) AS response_url

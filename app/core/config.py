@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     payload_s3_endpoint: str = "http://minio.minio.svc.cluster.local:9000"
     payload_s3_access_key: str = "litellm_admin"
     payload_s3_secret_key: SecretStr = SecretStr("CHANGE_ME")
-    payload_bucket_name: str = "litellm-payloads"
-    payload_public_base_url: str = "https://payloads.jppwl.asia/litellm-payloads"
+    payload_bucket_name: str = "payloads"
+    payload_public_base_url: str = "https://payloads.jppwl.asia/payloads"
     payload_upload_timeout_seconds: float = 2.0
 
     @field_validator(
