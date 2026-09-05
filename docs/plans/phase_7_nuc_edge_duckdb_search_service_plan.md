@@ -156,6 +156,53 @@ spec:
 - **路由**：Kong HTTPRoute 双前缀兼容（`/payloads` + `/litellm-payloads`）；
 - **数据**：9162 文件 / 4.73 GiB 已镜像完成，新写入已切换到新桶。
 
+#### 2.5.5 M1.5 hostNetwork 实验与性能优化策略修正
+
+**M1.5 实验结论**：
+- MinIO `hostNetwork` 与 `ClusterIP` 性能基本一致（COUNT(*) 均 ~4s），瓶颈不在 K8s 网络栈；
+- 已回滚 hostNetwork，保持标准 K8s 架构。
+
+**M1 性能数据深度分析**：
+
+| 查询类型 | 实测延迟 | 根因分析 |
+|----------|----------|----------|
+| 全表 COUNT(*) | ~4,000ms | 下载+解析所有 JSON，IO/CPU 密集 |
+| WHERE model='kimi-k3' | ~4,863ms | **更慢！** 需解析所有 JSON 提取 model 字段再过滤 |
+| WHERE filename LIKE '%00aa%' | ~470ms | **快 10 倍！** filename 是元数据，不用解析 JSON |
+| LIMIT 10 | ~140ms | **快 30 倍！** 只读前 10 个文件 |
+| GROUP BY + WHERE | ~2,084ms | 中等，聚合开销 |
+| WHERE model LIKE + LIMIT | ~487ms | **快！** LIMIT 起作用 |
+
+**关键发现**：
+- **`filename` 过滤最快**：DuckDB 把 `filename` 当元数据，不用下载/解析 JSON 内容；
+- **`LIMIT` 极快**：只读少量文件；
+- **`WHERE model` 更慢**：要解析所有 JSON 提取 `model` 字段，再过滤。
+
+**⚠️ 架构修正：`model` 字段在 MySQL 里有！不需要解析 JSON 提取！**
+
+**正确查询策略**：
+```
+用户查询 "kimi-k3 的调用"
+  → MySQL 查 request_id（快，5ms）
+  → PayloadLens 只查这些 request_id 的 payload（用 filename 过滤，~500ms）
+```
+
+**错误策略**（M1 踩坑）：
+```
+  → DuckDB 全扫所有 JSON 提取 model 字段（慢，4,863ms）
+```
+
+**生产优化策略**：
+
+| 查询场景 | 正确方案 | 预期延迟 |
+|----------|----------|----------|
+| 按 model 查 | MySQL 先查 `request_id`，再 DuckDB `WHERE filename LIKE '%{request_id}%'` | ~500ms |
+| 按日期查 | MySQL 先查 `request_id`，再 DuckDB `WHERE filename LIKE '%{date}%'` | ~500ms |
+| 按 request_id 查 | DuckDB `WHERE filename LIKE '%{request_id}%'` | ~500ms |
+| 分页浏览 | `LIMIT 20 OFFSET n` | ~200ms |
+| 全文搜索 | 必须全扫，但加 `LIMIT` 控制 | ~2-4s |
+| 组合查询 | MySQL 过滤 + DuckDB 全文搜索 | ~1-2s |
+
 ---
 
 ## 3. NUC 边缘端检索微服务设计 (独立仓库 `nvd11/payload-lens`)
@@ -496,12 +543,14 @@ async def _fetch_deep_search_ids(
     - 全文搜索：390ms ✅；
     - 内存占用：488MB（< 512MB 目标）✅；
     - **关键发现**：MinIO 底层存储为 `xl.meta` 二进制格式，必须通过 S3 API 读取；K8s ClusterIP 网络路径是性能瓶颈，需 MinIO hostNetwork 加速。
-- [ ] **Milestone 1.5: MinIO hostNetwork 网络加速改造**
+- [x] **Milestone 1.5: MinIO hostNetwork 网络加速实验与回滚**
   - 修改 `my-argocd-manifests/infrastructure/minio/minio.yaml`，添加 `hostNetwork: true` 与 `hostPort: 9000`；
   - 验证 NUC 本地 `localhost:9000` 直连 MinIO，绕过 K8s ClusterIP 网络栈；
-  - 复测 M1 PoC 性能指标，目标 COUNT(*) 从 4s 降至 < 1s。
+  - 复测 M1 PoC 性能指标，COUNT(*) 从 4s 降至 4.4s（无显著改善）；
+  - **结论**：瓶颈不在 K8s 网络栈，已回滚 hostNetwork，保持标准 ClusterIP 架构。
 - [ ] **Milestone 2: 封装极简 `payload-lens` 核心微服务与本地测试**
   - 将实证通过的高性能 SQL 检索逻辑封装进约 50 行的 FastAPI 微服务（`main.py`）；
+  - **核心设计**：MySQL 先过滤 `request_id`，DuckDB 只查这些 `request_id` 的 payload（`WHERE filename LIKE '%{request_id}%'`），避免全表扫描；
   - 完善参数校验、错误容错与日志输出；编写本地自动化单元测试验证 `/search` 接口输出。
 - [ ] **Milestone 3: 独立 Git 仓库 `nvd11/payload-lens` 创建与 15 秒极速 CI/CD**
   - 创建独立代码仓库 `nvd11/payload-lens`，编写纯净单阶段 `Dockerfile`；
