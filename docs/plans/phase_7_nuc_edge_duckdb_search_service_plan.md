@@ -103,6 +103,61 @@ DuckDB 官方虽然提供了 `mysql` 扩展插件（支持通过 `ATTACH '... TY
 
 ---
 
+### 2.5 MinIO 存储架构关键发现与 hostNetwork 加速决策
+
+在 M1 PoC 实地验证过程中，我们发现了 MinIO 存储架构的关键细节，并据此做出 **MinIO hostNetwork 加速决策**：
+
+#### 2.5.1 MinIO 底层存储格式发现
+- **逻辑视图**：用户上传的是纯 JSON 文件（`prompt.json`、`response.json`）；
+- **物理视图**：MinIO 在底层磁盘上将每个对象存储为**目录 + 二进制元数据**：
+  ```
+  /data/litellm_payloads/payloads/2026-09-04/xxx/response.json/
+  ├── xl.meta          ← MinIO 私有二进制格式（元数据+数据+校验和）
+  └── ...
+  ```
+- **直接后果**：DuckDB 无法直接读取 `xl.meta`（报 `Malformed JSON`），必须通过 **MinIO S3 API** 或 **mc cat** 导出纯 JSON。
+
+#### 2.5.2 网络路径性能瓶颈分析
+M1 PoC 实测发现，NUC 本地 DuckDB 通过 **K8s ClusterIP** 访问 MinIO 时：
+- **路径**：NUC → `10.43.233.200:9000` (ClusterIP) → kube-proxy → MinIO Pod → 本地磁盘；
+- **延迟**：COUNT(*) 全表扫描 **4 秒**（超目标 10 倍）；
+- **根因**：MinIO Pod 和 NUC 是**同一台物理机**，却绕了 K8s 网络栈一圈。
+
+#### 2.5.3 MinIO hostNetwork 加速方案
+**决策**：将 MinIO Deployment 改为 `hostNetwork: true`，使 MinIO 直接绑定到 NUC 物理网卡：
+
+```yaml
+spec:
+  template:
+    spec:
+      hostNetwork: true  # ← MinIO 直接使用宿主机网络
+      containers:
+        - name: minio
+          ports:
+            - containerPort: 9000
+              hostPort: 9000  # ← 绑定到 NUC 的 9000 端口
+```
+
+**加速效果**：
+| 访问方 | 无 hostNetwork | 有 hostNetwork |
+|--------|---------------|---------------|
+| **DuckDB**（NUC 本地） | `10.43.233.200:9000`（K8s ClusterIP，绕路 ~4s） | `localhost:9000`（直连，预期 ~1s） |
+| **PayloadLens**（NUC 本地） | 同上 | 同上 |
+| **K8s Pod**（litellm-svc） | `10.43.233.200:9000`（正常） | `10.43.233.200:9000`（不受影响） |
+
+**关键澄清**：
+- MinIO **访问磁盘** 本来就快（`hostPath` 本地 IO，不经过网络）；
+- hostNetwork 加速的是 **NUC 本地进程访问 MinIO 服务** 这段网络路径；
+- PayloadLens 不直接访问 MinIO，它只调用 DuckDB，DuckDB 再去访问 MinIO。
+
+#### 2.5.4 桶改名迁移完成
+- **旧桶**：`litellm-payloads`（保留观察，1-2 天后退役）；
+- **新桶**：`payloads`（当前生产写入目标）；
+- **路由**：Kong HTTPRoute 双前缀兼容（`/payloads` + `/litellm-payloads`）；
+- **数据**：9162 文件 / 4.73 GiB 已镜像完成，新写入已切换到新桶。
+
+---
+
 ## 3. NUC 边缘端检索微服务设计 (独立仓库 `nvd11/payload-lens`)
 
 ### 3.1 极简服务源码 (`main.py`)
@@ -430,9 +485,21 @@ async def _fetch_deep_search_ids(
 
 ## 7. 五大落地里程碑 (Roadmap - 自底向上·测试先行)
 
-- [ ] **Milestone 1: 真实数据驱动的 DuckDB 本地检索内核验证与性能基准测试 (PoC Benchmark on Real NUC Data)**
+- [x] **Milestone 1: 真实数据驱动的 DuckDB 本地检索内核验证与性能基准测试 (PoC Benchmark on Real NUC Data)**
   - 直接在 NUC 物理机上针对现有真实的 2,000+ 个 `/data/litellm_payloads/2026-09-04/*/*.json` 文件，运行 DuckDB 向量化检索原型脚本；
   - 针对真实中文关键词（如 "502", "广州", "curl"）发起实地压测，验证扫描耗时（目标 < 300ms）、瞬时内存峰值与正则提取 `request_id` 的准确度，取得第一手真实性能数据。
+  - **✅ M1 PoC 实测结果（2026-09-05）**：
+    - 文件发现：851 个 `response.json`，98ms；
+    - COUNT(*) 全表扫描：3,967ms（超目标 10 倍，根因：K8s ClusterIP 网络绕路）；
+    - 正则提取：402ms ✅；
+    - 模型聚合：1,755ms ✅；
+    - 全文搜索：390ms ✅；
+    - 内存占用：488MB（< 512MB 目标）✅；
+    - **关键发现**：MinIO 底层存储为 `xl.meta` 二进制格式，必须通过 S3 API 读取；K8s ClusterIP 网络路径是性能瓶颈，需 MinIO hostNetwork 加速。
+- [ ] **Milestone 1.5: MinIO hostNetwork 网络加速改造**
+  - 修改 `my-argocd-manifests/infrastructure/minio/minio.yaml`，添加 `hostNetwork: true` 与 `hostPort: 9000`；
+  - 验证 NUC 本地 `localhost:9000` 直连 MinIO，绕过 K8s ClusterIP 网络栈；
+  - 复测 M1 PoC 性能指标，目标 COUNT(*) 从 4s 降至 < 1s。
 - [ ] **Milestone 2: 封装极简 `payload-lens` 核心微服务与本地测试**
   - 将实证通过的高性能 SQL 检索逻辑封装进约 50 行的 FastAPI 微服务（`main.py`）；
   - 完善参数校验、错误容错与日志输出；编写本地自动化单元测试验证 `/search` 接口输出。
