@@ -11,8 +11,6 @@ charges. HTTP_PROXY/HTTPS_PROXY, when present, are inherited by LiteLLM.
 import os
 
 import pytest
-from litellm import acompletion
-from litellm.exceptions import APIError, RateLimitError
 
 from app.core.config import get_settings
 
@@ -23,6 +21,9 @@ async def test_real_gemini_chat_completion() -> None:
 
     if os.getenv("RUN_REAL_GEMINI_TESTS") != "1":
         pytest.skip("set RUN_REAL_GEMINI_TESTS=1 to run the paid integration test")
+
+    from litellm import acompletion
+    from litellm.exceptions import APIError, RateLimitError
 
     settings = get_settings()
     api_key = settings.openai_api_key_free_1.get_secret_value()

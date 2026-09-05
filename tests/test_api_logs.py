@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 
 from app.core.config import Settings, get_settings
+from app.core.connectivity import CheckResult
 from app.main import app
 
 
@@ -44,6 +45,53 @@ async def test_health_endpoints() -> None:
 
         res_v1 = await client.get("/api/v1/health")
         assert res_v1.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_readiness_endpoint_all_dependencies_ok(mock_test_settings: Settings) -> None:
+    """Readiness returns 200 when MySQL and Redis checks pass."""
+    app.dependency_overrides[get_settings] = lambda: mock_test_settings
+
+    async def mock_check_all(_settings: Settings) -> list[CheckResult]:
+        return [
+            CheckResult("mysql", True, 1.2, "connected"),
+            CheckResult("redis", True, 0.8, "connected"),
+        ]
+
+    with patch("app.api.health.check_all", side_effect=mock_check_all):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/api/v1/health/readiness")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "ok"
+            assert [item["name"] for item in data["dependencies"]] == ["mysql", "redis"]
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_readiness_endpoint_degraded_dependency(mock_test_settings: Settings) -> None:
+    """Readiness returns 503 without leaking sensitive error details."""
+    app.dependency_overrides[get_settings] = lambda: mock_test_settings
+
+    async def mock_check_all(_settings: Settings) -> list[CheckResult]:
+        return [
+            CheckResult("mysql", False, None, "connection_refused"),
+            CheckResult("redis", True, 0.8, "connected"),
+        ]
+
+    with patch("app.api.health.check_all", side_effect=mock_check_all):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/api/v1/health/readiness")
+            assert res.status_code == 503
+            data = res.json()
+            assert data["status"] == "degraded"
+            assert data["dependencies"][0]["detail"] == "connection_refused"
+            assert "pass" not in str(data).lower()
+
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Settings, redacted_summary
+from app.core.config import Settings, parse_csv_origins, redacted_summary
 
 
 def _env() -> dict[str, str]:
@@ -60,3 +60,16 @@ def test_redacted_summary_does_not_expose_secrets(monkeypatch):
     assert "test-mysql-password" not in summary
     assert "test-redis-password" not in summary
     assert "test-gemini-key" not in summary
+
+
+def test_parse_csv_origins():
+    default = ["http://localhost:5173"]
+
+    assert parse_csv_origins(None, default) == default
+    assert parse_csv_origins("", default) == default
+    assert parse_csv_origins("   ", default) == default
+    assert parse_csv_origins("https://a.example.com, https://b.example.com ", default) == [
+        "https://a.example.com",
+        "https://b.example.com",
+    ]
+    assert parse_csv_origins("*", default) == ["*"]

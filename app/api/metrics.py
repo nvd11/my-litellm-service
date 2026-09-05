@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, select
 
 from app.core.config import Settings, get_settings
 from app.db import get_async_engine, llm_request_logs
@@ -70,7 +70,9 @@ async def get_summary_metrics(
             func.sum(llm_request_logs.c.cost_cny).label("sum_cost_cny"),
             func.sum(llm_request_logs.c.cost_usd).label("sum_cost_usd"),
             func.avg(llm_request_logs.c.latency_ms).label("avg_latency"),
-            func.sum(func.if_(llm_request_logs.c.status_code == 200, 1, 0)).label("success_count"),
+            func.sum(case((llm_request_logs.c.status_code == 200, 1), else_=0)).label(
+                "success_count"
+            ),
         )
         .where(llm_request_logs.c.created_at >= start_dt)
         .where(llm_request_logs.c.created_at <= end_dt)

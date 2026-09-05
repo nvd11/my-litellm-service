@@ -104,3 +104,13 @@ def redacted_summary(settings: Settings) -> dict[str, object]:
         "payload_bucket_name": settings.payload_bucket_name,
         "secrets": "***",
     }
+
+
+def parse_csv_origins(raw: str | None, default: list[str]) -> list[str]:
+    """Parse comma-separated CORS origins with a safe fallback default."""
+
+    if raw is None or not raw.strip():
+        return default
+
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return origins or default

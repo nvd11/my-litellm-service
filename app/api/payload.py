@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import aioboto3
@@ -62,7 +62,7 @@ async def get_request_payload(
         if target_date:
             date_str = target_date.strftime("%Y-%m-%d")
         else:
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = datetime.now(UTC).strftime("%Y-%m-%d")
 
     prefix = f"{date_str}/{request_id}"
     base_url = settings.payload_public_base_url.rstrip("/")
@@ -123,7 +123,10 @@ async def get_request_payload(
         prompt_data["is_truncated"] = True
         notice_msg = {
             "role": "system",
-            "content": f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，点击下方“加载全部消息”可获取全量上下文 ...）",
+            "content": (
+                f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，"
+                "点击下方“加载全部消息”可获取全量上下文 ...）"
+            ),
         }
         prompt_data["messages"] = messages[:5] + [notice_msg] + messages[-20:]
 

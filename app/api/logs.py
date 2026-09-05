@@ -1,6 +1,6 @@
 """LiteLLM Audit Logs Query API Module."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -127,7 +127,7 @@ async def list_audit_logs(
 
         # 将展示给客户端的时间戳显式附加 UTC 时区并转换为香港时间 (HKT, UTC+8)
         created_dt_hkt = (
-            created_dt_raw.replace(tzinfo=timezone.utc).astimezone(HKT)
+            created_dt_raw.replace(tzinfo=UTC).astimezone(HKT)
             if created_dt_raw.tzinfo is None
             else created_dt_raw.astimezone(HKT)
         )

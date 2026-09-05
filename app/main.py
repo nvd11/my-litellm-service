@@ -1,6 +1,7 @@
 """LiteLLM Observatory FastAPI Application Entrypoint."""
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -10,6 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import api_router
+from app.api.health import router as health_router
+from app.core.config import parse_csv_origins
 
 logger = logging.getLogger("app.main")
 
@@ -22,26 +25,28 @@ app = FastAPI(
 # 开启 Gzip 传输压缩，大幅减少网络传输耗时
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# 配置 CORS 允许跨域（本地开发时支持 Vite 本地调试端口）
+# 配置 CORS：默认仅放行本地 Vite 调试端口，生产可通过 DASHBOARD_ALLOWED_ORIGINS 覆盖。
+DEFAULT_DASHBOARD_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+dashboard_allowed_origins = parse_csv_origins(
+    os.getenv("DASHBOARD_ALLOWED_ORIGINS"),
+    DEFAULT_DASHBOARD_ORIGINS,
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=dashboard_allowed_origins,
+    allow_credentials="*" not in dashboard_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-@app.get("/health", tags=["Health"])
-@app.get("/health/liveliness", tags=["Health"])
-@app.get("/health/readiness", tags=["Health"])
-@app.get("/api/v1/health", tags=["Health"])
-async def health_check() -> dict[str, str]:
-    """Health check endpoint for Kubernetes probes and monitoring."""
-    return {"status": "ok", "service": "litellm-observability"}
-
-
-# 注册业务 API 路由
+# 注册健康检查与业务 API 路由
+app.include_router(health_router)
 app.include_router(api_router)
 
 # 静态资源挂载与 SPA 路由兜底

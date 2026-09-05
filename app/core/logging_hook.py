@@ -27,7 +27,16 @@ import logging
 import uuid
 from typing import Any
 
-from litellm.integrations.custom_logger import CustomLogger
+try:
+    from litellm.integrations.custom_logger import CustomLogger
+except Exception:  # pragma: no cover - only used by unit tests without LiteLLM native deps.
+
+    class CustomLogger:  # type: ignore[no-redef]
+        """Fallback base class for environments where LiteLLM cannot be imported."""
+
+        pass
+
+
 from sqlalchemy import insert
 
 from app.core.config import Settings, get_settings
@@ -413,10 +422,10 @@ def _extract_error_message(response_obj: Any, kwargs: dict[str, Any]) -> str | N
                 if isinstance(err_val, dict) and "message" in err_val:
                     return str(err_val["message"])
                 return str(err_val)
-        if hasattr(cand, "message") and getattr(cand, "message"):
-            return str(getattr(cand, "message"))
-        if hasattr(cand, "description") and getattr(cand, "description"):
-            return str(getattr(cand, "description"))
+        if hasattr(cand, "message") and cand.message:
+            return str(cand.message)
+        if hasattr(cand, "description") and cand.description:
+            return str(cand.description)
         cand_str = str(cand).strip()
         if cand_str and cand_str.lower() != "none":
             return cand_str
@@ -607,21 +616,26 @@ custom_logger = DBLoggingLogger()
 def _mount_observability_on_proxy() -> None:
     try:
         from pathlib import Path
-        from fastapi.responses import FileResponse
-        from fastapi.staticfiles import StaticFiles
+
         import litellm.proxy._types as pt
         import litellm.proxy.proxy_server as ps
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
+
         from app.api import api_router
 
-        # 1. 动态将 /dashboard 与 /api/v1 注册进 LiteLLM 免鉴权路由白名单 (外部受 Kong + Logto SSO 保护)
+        # 1. 动态注册免鉴权路由白名单 (外部受 Kong + Logto SSO 保护)
         public_set = set(pt.LiteLLMRoutes.public_routes.value)
-        public_set.update({
-            "/dashboard",
-            "/dashboard/",
-            "/api/v1/health",
-            "/api/v1/logs",
-            "/api/v1/metrics/summary",
-        })
+        public_set.update(
+            {
+                "/dashboard",
+                "/dashboard/",
+                "/api/v1/health",
+                "/api/v1/health/readiness",
+                "/api/v1/logs",
+                "/api/v1/metrics/summary",
+            }
+        )
         pt.LiteLLMRoutes.public_routes._value_ = frozenset(public_set)
 
         if ps.general_settings is None:
