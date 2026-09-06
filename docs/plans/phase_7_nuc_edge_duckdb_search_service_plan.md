@@ -1,6 +1,14 @@
-# Phase 7 实施计划：PayloadLens 边缘端 DuckDB 极速全文检索微服务与看板穿透架构
+# [DEPRECATED / OUTDATED] Phase 7 实施计划：PayloadLens 边缘端 DuckDB 极速全文检索微服务与看板穿透架构
 
-> **核心目标**：贯彻分布式架构“计算贴着存储跑（Compute follows Data）”的设计哲学，彻底杜绝跨国公网对数万个 S3 小文件做全量拉取引发的“网络风暴”与“内存雪崩”。在 **K3s NUC 节点（广州家庭宽带 800GB NVMe 本地磁盘）** 部署微型检索服务（**`payload-lens`**，代码托管于独立仓库 **`nvd11/payload-lens`**），直接挂载本地物理目录（`hostPath: /data/litellm_payloads`）；利用 **DuckDB 向量化内存执行引擎** 实现 3,000 MB/s 纯物理磁盘极速扫描；跨云仅回传几百字节的命中 `request_id` 结果集；与 **云端 FastAPI 后端** 及 **React 前端看板** 深度联动，实现秒级海量 Prompt / Response 全文关键词穿透搜索。
+> ⚠️ **状态声明：本方案已被正式废弃（DEPRECATED / OUTDATED）**  
+> 📅 **废弃日期**：2026-09-06  
+> 🔄 **替代方案**：请参见最新的架构迁移方案 **[`phase_7_minio_to_victorialogs_migration_plan.md`](./phase_7_minio_to_victorialogs_migration_plan.md)**  
+> 💡 **废弃理由**：  
+> 本计划原本设计通过在边缘 NUC 独立部署 DuckDB 微服务（`payload-lens`）来解决 MinIO S3 小文件无法全文检索的问题。经过最新架构推演，该方案引入了额外独立的微服务实体和脆弱的边缘服务依赖。团队已决定彻底实施“奥卡姆剃刀”——**直接将存储底座从 MinIO (S3) 整体迁移至轻量级列式日志引擎 VictoriaLogs**。在新架构下，海量小文件碎屑、DuckDB 外挂计算、PayloadLens 胶水服务以及 S3 异步上传链路被全部降维消除，原生享受 10:1 列式块压缩与毫秒级 LogsQL 全文检索。故保留本文档仅作为历史架构演进与技术对比参考，不再付诸实施。
+
+---
+
+# Phase 7 实施计划：PayloadLens 边缘端 DuckDB 极速全文检索微服务与看板穿透架构 (ARCHIVED)
 
 ---
 
