@@ -78,6 +78,10 @@ VictoriaLogs 原生支持以 JSON 流式追加写入。在 `app/core/logging_hoo
 {
   "_time": "2026-09-06T05:32:46.000Z",
   "_stream": "{env=\"prod\",service=\"litellm\",type=\"payload\"}",
+  "_msg": "LLM 调用日志: request_id=req-9c8f2b3e, model=gemini-3.8-flash, status=200, latency=782ms",
+  "env": "prod",
+  "service": "litellm",
+  "type": "payload",
   "request_id": "req-9c8f2b3e-5a12-4d3a-b8e7-112233445566",
   "model": "gemini-3.8-flash",
   "key_alias": "yui-radxa",
@@ -100,6 +104,8 @@ VictoriaLogs 原生支持以 JSON 流式追加写入。在 `app/core/logging_hoo
   * `env="prod"`：环境标识（prod / staging / dev）；
   * `service="litellm"`：服务标识（litellm / fastapi / quarkus 等）；
   * `type="payload"`：数据类型标识（payload / metric / trace），**核心区分字段**，用于隔离 LLM 报文与 K3s 系统日志；
+* **`_msg`**：**必须字段**，日志消息摘要，VictoriaLogs 依此显示日志内容，缺失会导致 `missing _msg field` 警告；
+* **`env` / `service` / `type`**：**普通字段副本**，与 `_stream` 标签保持一致，用于 LogsQL 查询过滤（`_stream` 查询语法复杂，普通字段更直观）；
 * **其他所有字段**：自动作为高吞吐列式字段存储，`prompt` 与 `response` 自动纳入流式倒排全文分词索引。
 
 #### 3.1.1 `_stream` 流标签设计规范（方案 B）
@@ -116,6 +122,47 @@ VictoriaLogs 使用 `_stream` 字段实现多租户逻辑隔离，本系统采�
 1. **低基数优先**：`_stream` 标签组合数应控制在 100 以内，避免高基数导致索引膨胀；
 2. **type 为核心区分字段**：K3s 系统日志由 Fluent Bit 自动采集，`_stream` 为 `{kubernetes.container_name="...", ...}`；LLM Payload 使用 `{env="prod", service="litellm", type="payload"}`，两者天然隔离；
 3. **查询时显式指定**：所有 LogsQL 查询必须显式包含 `_stream` 过滤，避免误查系统日志。
+
+#### 3.1.2 `_msg` 字段必要性说明
+
+**VictoriaLogs 强制要求每条日志必须包含 `_msg` 字段**，否则：
+- 日志会被标记为 `missing _msg field`；
+- Web UI 中日志内容显示为警告信息而非实际内容；
+- 数据仍可查询，但可读性极差。
+
+**`_msg` 字段设计规范**：
+```python
+# 推荐格式：包含关键标识信息，便于快速浏览
+_msg = f"LLM 调用日志: request_id={request_id}, model={model}, status={status_code}, latency={latency_ms}ms"
+
+# 错误示例（缺失 _msg）：
+# 日志显示: "missing _msg field; see https://docs.victoriametrics.com/victorialogs/keyconcepts/#message-field"
+```
+
+#### 3.1.3 `_stream` 标签与普通字段双写机制
+
+**核心发现**：VictoriaLogs 的 `_stream` 标签与普通字段是**独立存储**的：
+- `_stream` 标签：显示在 Web UI 左侧 Stream fields，用于流隔离；
+- 普通字段：用于 LogsQL 查询过滤，语法更直观。
+
+**双写机制**：
+```json
+{
+  "_stream": "{env=\"prod\",service=\"litellm\",type=\"payload\"}",
+  "env": "prod",
+  "service": "litellm",
+  "type": "payload"
+}
+```
+
+**查询方式对比**：
+
+| 查询方式 | 语法 | 优点 | 缺点 |
+| :--- | :--- | :--- | :--- |
+| `_stream` 过滤 | `_stream: "{env=\"prod\"}"` | 精确匹配流 | 语法复杂，需转义 |
+| 普通字段过滤 | `env: "prod"` | 语法直观 | 需确保字段与标签一致 |
+
+**推荐**：生产环境使用**普通字段过滤**（语法直观），同时保持 `_stream` 标签用于流隔离和 UI 展示。
 
 **与 K3s 系统日志的区分**：
 
@@ -140,10 +187,10 @@ _stream: "{kubernetes.container_name=\"proxy\", kubernetes.namespace_name=\"kong
 
 | 业务场景 | 前端 API 路由 | 底层 VictoriaLogs LogsQL 语句 |
 | :--- | :--- | :--- |
-| **根据 ID 点查报文** | `GET /api/logs/{request_id}/payload` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND request_id: "req-xxx"` |
-| **关键字搜 Prompt** | `GET /api/logs?q={keyword}` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 7d AND prompt: "广发信用卡"` |
-| **模型耗时分布统计** | `GET /api/metrics/latency-dist` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 24h \| stats by (model) quantile(0.5, latency_ms) as p50, quantile(0.99, latency_ms) as p99` |
-| **各 Agent 花销排行** | `GET /api/metrics/top-spenders` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 30d \| stats by (key_alias) sum(spend) as total_spend \| sort by (total_spend) desc` |
+| **根据 ID 点查报文** | `GET /api/logs/{request_id}/payload` | `env: "prod" AND type: "payload" AND request_id: "req-xxx"` |
+| **关键字搜 Prompt** | `GET /api/logs?q={keyword}` | `env: "prod" AND type: "payload" AND _time: 7d AND prompt: "广发信用卡"` |
+| **模型耗时分布统计** | `GET /api/metrics/latency-dist` | `env: "prod" AND type: "payload" AND _time: 24h \| stats by (model) quantile(0.5, latency_ms) as p50, quantile(0.99, latency_ms) as p99` |
+| **各 Agent 花销排行** | `GET /api/metrics/top-spenders` | `env: "prod" AND type: "payload" AND _time: 30d \| stats by (key_alias) sum(spend) as total_spend \| sort by (total_spend) desc` |
 
 ---
 
