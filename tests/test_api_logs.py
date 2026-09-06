@@ -7,9 +7,28 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 
+from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
 from app.core.connectivity import CheckResult
+from app.core.payload_backend import PayloadBackend
 from app.main import app
+
+
+class MockPayloadBackend(PayloadBackend):
+    """Mock Payload Backend for testing."""
+
+    def __init__(self, prompt_data=None, response_data=None):
+        self.prompt_data = prompt_data or {}
+        self.response_data = response_data or {}
+
+    async def write_payload(self, request_id, prompt, response, metadata):
+        return True
+
+    async def read_payload(self, request_id, date=None):
+        return self.prompt_data, self.response_data
+
+    async def health_check(self):
+        return True
 
 
 @pytest.fixture
@@ -203,31 +222,23 @@ async def test_summary_metrics(mock_test_settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_get_request_payload_success(mock_test_settings: Settings) -> None:
-    """Test retrieving structured S3 payload."""
+    """Test retrieving structured payload via PayloadBackend."""
     app.dependency_overrides[get_settings] = lambda: mock_test_settings
 
-    mock_s3_client = AsyncMock()
-    prompt_sample = b'{"model":"gemini","system_prompt":"sys","user_prompt":"hi"}'
-    mock_s3_client.get_object.side_effect = [
-        {"Body": AsyncMock(read=AsyncMock(return_value=prompt_sample))},
-        {"Body": AsyncMock(read=AsyncMock(return_value=b'{"reply":"hello there"}'))},
-    ]
+    # Mock PayloadBackend
+    mock_backend = MockPayloadBackend(
+        prompt_data={"model": "gemini", "system_prompt": "sys", "user_prompt": "hi"},
+        response_data={"reply": "hello there"},
+    )
+    app.dependency_overrides[get_payload_backend] = lambda: mock_backend
 
-    mock_context = AsyncMock()
-    mock_context.__aenter__.return_value = mock_s3_client
-    mock_context.__aexit__.return_value = None
-
-    mock_session = MagicMock()
-    mock_session.client.return_value = mock_context
-
-    with patch("aioboto3.Session", return_value=mock_session):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.get("/api/v1/logs/req-test-99/payload?date=2026-09-03")
-            assert res.status_code == 200
-            data = res.json()
-            assert data["request_id"] == "req-test-99"
-            assert data["prompt"]["user_prompt"] == "hi"
-            assert data["response"]["reply"] == "hello there"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.get("/api/v1/logs/req-test-99/payload?date=2026-09-03")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["request_id"] == "req-test-99"
+        assert data["prompt"]["user_prompt"] == "hi"
+        assert data["response"]["reply"] == "hello there"
 
     app.dependency_overrides.clear()

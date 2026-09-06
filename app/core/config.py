@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     payload_public_base_url: str = "https://payloads.jppwl.asia/payloads"
     payload_upload_timeout_seconds: float = 2.0
 
+    # === Payload Backend Settings ===
+    payload_backend: str = "minio"  # minio / victorialogs / dual
+    victorialogs_url: str = "http://100.95.20.57:9428"  # Starfive Tailscale
+    victorialogs_timeout: float = 10.0
+
     @field_validator(
         "mysql_port",
         "redis_port",
@@ -103,6 +108,8 @@ def redacted_summary(settings: Settings) -> dict[str, object]:
         "enable_payload_offload": settings.enable_payload_offload,
         "payload_s3_endpoint": settings.payload_s3_endpoint,
         "payload_bucket_name": settings.payload_bucket_name,
+        "payload_backend": settings.payload_backend,
+        "victorialogs_url": settings.victorialogs_url,
         "secrets": "***",
     }
 

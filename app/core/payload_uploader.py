@@ -1,14 +1,12 @@
-"""LiteLLM Asynchronous Payload (Prompt/Response) Offloading Module via S3 API."""
+"""LiteLLM Asynchronous Payload (Prompt/Response) Offloading Module via PayloadBackend."""
 
-import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-import aioboto3
-from botocore.config import Config
-
+from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
+from app.core.payload_backend import PayloadBackend
 
 logger = logging.getLogger(__name__)
 
@@ -184,8 +182,9 @@ async def async_upload_payload(
     response_obj: Any,
     start_time: datetime | None = None,
     settings: Settings | None = None,
+    backend: PayloadBackend | None = None,
 ) -> None:
-    """Asynchronously upload Prompt and Response payloads to the S3 / MinIO storage endpoint.
+    """Asynchronously upload Prompt and Response payloads via configured PayloadBackend.
 
     This function isolates all exceptions to ensure payload storage failures never impact
     primary proxy responses or database metric persistence.
@@ -202,54 +201,39 @@ async def async_upload_payload(
         if date_ref.tzinfo is None:
             date_ref = date_ref.replace(tzinfo=UTC)
         date_str = date_ref.strftime("%Y-%m-%d")
-        key_prefix = f"{date_str}/{request_id}"
 
         prompt_dict = extract_prompt_payload(kwargs)
         response_dict = extract_response_payload(response_obj)
 
-        prompt_bytes = json.dumps(
-            prompt_dict,
-            ensure_ascii=False,
-            indent=2,
-            default=_json_default,
-        ).encode("utf-8")
-        response_bytes = json.dumps(
-            response_dict,
-            ensure_ascii=False,
-            indent=2,
-            default=_json_default,
-        ).encode("utf-8")
+        # 构建元数据
+        metadata = {
+            "date": date_str,
+            "timestamp": date_ref.isoformat(),
+            "model": kwargs.get("model") or "unknown",
+            "key_alias": kwargs.get("user_api_key_alias") or kwargs.get("key_alias") or "default",
+            "status_code": 200 if not isinstance(response_obj, Exception) else 500,
+            "latency_ms": 0,  # 由调用方填充
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "spend": 0.0,
+        }
 
-        session = aioboto3.Session()
-        boto_config = Config(
-            connect_timeout=resolved_settings.payload_upload_timeout_seconds,
-            read_timeout=resolved_settings.payload_upload_timeout_seconds,
-            retries={"max_attempts": 2},
+        # 获取后端实例
+        payload_backend = backend or get_payload_backend(resolved_settings)
+
+        # 写入 payload
+        success = await payload_backend.write_payload(
+            request_id=request_id,
+            prompt=prompt_dict,
+            response=response_dict,
+            metadata=metadata,
         )
 
-        secret_key_str = resolved_settings.payload_s3_secret_key.get_secret_value()
-
-        async with session.client(
-            "s3",
-            endpoint_url=resolved_settings.payload_s3_endpoint,
-            aws_access_key_id=resolved_settings.payload_s3_access_key,
-            aws_secret_access_key=secret_key_str,
-            config=boto_config,
-        ) as s3_client:
-            await s3_client.put_object(
-                Bucket=resolved_settings.payload_bucket_name,
-                Key=f"{key_prefix}/prompt.json",
-                Body=prompt_bytes,
-                ContentType="application/json; charset=utf-8",
-            )
-            await s3_client.put_object(
-                Bucket=resolved_settings.payload_bucket_name,
-                Key=f"{key_prefix}/response.json",
-                Body=response_bytes,
-                ContentType="application/json; charset=utf-8",
-            )
-
-        logger.debug("Successfully uploaded payload for request %s to S3", request_id)
+        if success:
+            logger.debug("Successfully uploaded payload for request %s", request_id)
+        else:
+            logger.warning("Failed to upload payload for request %s", request_id)
     except Exception as exc:
         # Full exception boundary isolation
-        logger.warning("Failed to async upload payload for %s to S3: %s", request_id, exc)
+        logger.warning("Failed to async upload payload for %s: %s", request_id, exc)

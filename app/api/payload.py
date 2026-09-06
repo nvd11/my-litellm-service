@@ -1,17 +1,17 @@
-"""LiteLLM S3 Payload Direct Proxy & Inspection API Module."""
+"""LiteLLM Payload Direct Proxy & Inspection API Module."""
 
 import json
 import logging
 from datetime import UTC, date, datetime
 from typing import Any
 
-import aioboto3
-from botocore.config import Config
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
+from app.core.payload_backend import PayloadBackend
 from app.db import get_async_engine, llm_request_logs
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,16 @@ async def get_request_payload(
     ),
     full: bool = Query(False, description="Whether to load full messages without truncation"),
     settings: Settings = Depends(get_settings),
+    backend: PayloadBackend = Depends(get_payload_backend),
 ) -> Any:
-    """Fetch structured Prompt and Response payloads directly from NUC MinIO S3."""
+    """Fetch structured Prompt and Response payloads via configured PayloadBackend.
+
+    When multiple shards exist in VictoriaLogs for an oversized payload, the backend
+    dynamically reassembles them in ascending shard_index order back into the full document.
+    """
     date_str: str | None = None
 
-    # 1. 优先从 MySQL 查询该 request_id 实际落库时的 UTC 日期分区 (对齐 S3 物理路径)
+    # 1. 优先从 MySQL 查询该 request_id 实际落库时的 UTC 日期分区
     try:
         engine = get_async_engine(settings)
         stmt = (
@@ -64,58 +69,28 @@ async def get_request_payload(
         else:
             date_str = datetime.now(UTC).strftime("%Y-%m-%d")
 
-    prefix = f"{date_str}/{request_id}"
+    # 3. 通过抽象基类读取 payload (VictoriaLogs 内部自动完成多分片重组还原)
+    prompt_data, response_data = await backend.read_payload(request_id, date_str)
+
+    # 容错：如果后端返回的是字符串则安全解析为字典
+    if isinstance(prompt_data, str):
+        try:
+            prompt_data = json.loads(prompt_data)
+        except Exception:
+            prompt_data = {"user_prompt": prompt_data}
+    if isinstance(response_data, str):
+        try:
+            response_data = json.loads(response_data)
+        except Exception:
+            response_data = {"reply": response_data}
+
+    # 4. 构建公开访问 URL（仅 MinIO 后端适用）
     base_url = settings.payload_public_base_url.rstrip("/")
+    prefix = f"{date_str}/{request_id}"
     prompt_url = f"{base_url}/{prefix}/prompt.json"
     response_url = f"{base_url}/{prefix}/response.json"
 
-    session = aioboto3.Session()
-    boto_config = Config(
-        connect_timeout=5.0,
-        read_timeout=5.0,
-        retries={"max_attempts": 2},
-    )
-
-    prompt_data: dict[str, Any] = {}
-    response_data: dict[str, Any] = {}
-
-    try:
-        async with session.client(
-            "s3",
-            endpoint_url=settings.payload_s3_endpoint,
-            aws_access_key_id=settings.payload_s3_access_key,
-            aws_secret_access_key=settings.payload_s3_secret_key.get_secret_value(),
-            config=boto_config,
-        ) as s3_client:
-            # 尝试拉取 prompt.json
-            try:
-                prompt_obj = await s3_client.get_object(
-                    Bucket=settings.payload_bucket_name,
-                    Key=f"{prefix}/prompt.json",
-                )
-                prompt_bytes = await prompt_obj["Body"].read()
-                prompt_data = json.loads(prompt_bytes.decode("utf-8"))
-            except Exception as e:
-                logger.debug("Prompt payload not found in S3 for %s: %s", request_id, e)
-                prompt_data = {"user_prompt": "（此历史调用的原始输入报文未在 MinIO 归档）"}
-
-            # 尝试拉取 response.json
-            try:
-                resp_obj = await s3_client.get_object(
-                    Bucket=settings.payload_bucket_name,
-                    Key=f"{prefix}/response.json",
-                )
-                resp_bytes = await resp_obj["Body"].read()
-                response_data = json.loads(resp_bytes.decode("utf-8"))
-            except Exception as e:
-                logger.debug("Response payload not found in S3 for %s: %s", request_id, e)
-                response_data = {"reply": "（此历史调用的原始模型回复未在 MinIO 归档）"}
-    except Exception as exc:
-        logger.warning("Failed to connect to S3 to read payload for %s: %s", request_id, exc)
-        prompt_data = {"user_prompt": f"（S3 存储节点响应超时或暂时离线: {exc}）"}
-        response_data = {"reply": "（无法从 NUC MinIO 读取回复报文）"}
-
-    # 对超长多轮对话 (>30 条消息) 做智能轻量化抽样，缩短 99% 的网络传输耗时实现毫秒级秒开
+    # 5. 对超长多轮对话 (>30 条消息) 做智能轻量化抽样
     messages = prompt_data.get("messages")
     if isinstance(messages, list) and len(messages) > 30 and not full:
         total_count = len(messages)
@@ -125,7 +100,7 @@ async def get_request_payload(
             "role": "system",
             "content": (
                 f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，"
-                "点击下方“加载全部消息”可获取全量上下文 ...）"
+                "点击下方「加载全部消息」可获取全量上下文 ...）"
             ),
         }
         prompt_data["messages"] = messages[:5] + [notice_msg] + messages[-20:]
