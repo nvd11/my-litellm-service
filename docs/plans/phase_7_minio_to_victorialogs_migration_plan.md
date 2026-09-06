@@ -204,21 +204,433 @@ _stream: "{kubernetes.container_name=\"proxy\", kubernetes.namespace_name=\"kong
   * 配置 K3s Service `victorialogs.monitoring.svc.cluster.local:9428`。
 
 ### Phase 7.2：微服务代码重构与解耦 (Code Refactoring)
-1. **淘汰 `app/core/payload_uploader.py` (移除 aioboto3)**：
-   * 移除 `aioboto3` 与 `botocore` 依赖；
-   * 新建轻量异步上报模块 `app/core/vlogs_logger.py`，使用已有高性能 `httpx.AsyncClient` 执行异步批量推送：
-     ```python
-     async def async_ship_to_victorialogs(log_entry: dict[str, Any]) -> None:
-         """Ship unified LLM audit entry (metadata + payloads) to VictoriaLogs."""
-         endpoint = f"{settings.VICTORIALOGS_URL}/insert/jsonline"
-         # 非阻塞异步 POST，带毫秒级超时与异常捕获，绝不阻塞主响应
-         ...
-     ```
-2. **重构 `app/core/logging_hook.py`**：
-   * 在请求完成钩子中，直接把 `extract_prompt_payload()` 与 `extract_response_payload()` 组装进 JSON，单次投递给 VictoriaLogs。
-3. **改造 FastAPI 查询端点 (`app/api/endpoints/logs.py`)**：
-   * 废除通过 S3 Pre-signed URL / Kong 代理下载文件的旧逻辑；
-   * 点查接口改为直接向 VictoriaLogs `POST /select/logsql/query` 发起流式按 ID 精确查询并返回 JSON。
+
+#### 4.2.1 核心设计：抽象基类 + 双子类模式
+
+为支持 **MinIO → VictoriaLogs 平滑迁移** 及未来可能的存储后端扩展（如 Elasticsearch、ClickHouse），采用 **抽象基类 + 策略模式** 设计：
+
+```
+┌─────────────────────────────────────┐
+│      PayloadBackend (ABC)           │
+│  ├─ write_payload(request_id, ...)  │
+│  ├─ read_payload(request_id, ...)   │
+│  └─ health_check()                  │
+└─────────────────────────────────────┘
+              △
+              │
+    ┌─────────┴─────────┐
+    │                   │
+┌───┴───┐          ┌───┴────────┐
+│MinIO  │          │VictoriaLogs│
+│Backend│          │Backend     │
+└───────┘          └────────────┘
+```
+
+**设计优势**：
+| 原则 | 说明 |
+| :--- | :--- |
+| **开闭原则** | 新增后端（如 Elasticsearch）只需加子类，不改核心逻辑 |
+| **灰度切换** | 配置一键切换 `payload_backend=minio/victorialogs` |
+| **双写对比** | 可同时实例化两个子类，并行写入对比 |
+| **测试友好** | Mock 抽象类即可单元测试 |
+| **职责清晰** | 读写分离，各子类专注自身协议 |
+
+#### 4.2.2 抽象基类定义 (`app/core/payload_backend.py`)
+
+```python
+"""Payload 存储后端抽象基类"""
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+
+class PayloadBackend(ABC):
+    """Payload 存储后端抽象基类，定义统一读写接口"""
+
+    @abstractmethod
+    async def write_payload(
+        self,
+        request_id: str,
+        prompt: dict[str, Any],
+        response: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> bool:
+        """写入 payload，返回是否成功
+
+        Args:
+            request_id: 请求唯一标识
+            prompt: 用户输入报文
+            response: 模型输出报文
+            metadata: 调用元数据（model, key_alias, tokens, latency 等）
+
+        Returns:
+            bool: 写入是否成功
+        """
+        pass
+
+    @abstractmethod
+    async def read_payload(
+        self,
+        request_id: str,
+        date: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """读取 payload，返回 (prompt, response)
+
+        Args:
+            request_id: 请求唯一标识
+            date: 可选日期分区（YYYY-MM-DD），用于加速查询
+
+        Returns:
+            tuple: (prompt_data, response_data)，不存在时返回空 dict
+        """
+        pass
+
+    @abstractmethod
+    async def health_check(self) -> bool:
+        """后端健康检查
+
+        Returns:
+            bool: 后端是否可用
+        """
+        pass
+```
+
+#### 4.2.3 MinIO 子类实现 (`app/core/backends/minio_backend.py`)
+
+```python
+"""MinIO S3 Payload 后端实现"""
+
+import json
+import logging
+from typing import Any
+
+import aioboto3
+from botocore.config import Config
+
+from app.core.config import Settings
+from app.core.payload_backend import PayloadBackend
+
+logger = logging.getLogger(__name__)
+
+
+class MinIOBackend(PayloadBackend):
+    """MinIO S3 存储后端"""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.session = aioboto3.Session()
+        self.boto_config = Config(
+            connect_timeout=5.0,
+            read_timeout=5.0,
+            retries={"max_attempts": 2},
+        )
+
+    async def write_payload(
+        self,
+        request_id: str,
+        prompt: dict[str, Any],
+        response: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> bool:
+        """写入 MinIO S3（保持现有行为）"""
+        date_str = metadata.get("date", "")
+        prefix = f"{date_str}/{request_id}"
+
+        try:
+            async with self.session.client(
+                "s3",
+                endpoint_url=self.settings.payload_s3_endpoint,
+                aws_access_key_id=self.settings.payload_s3_access_key,
+                aws_secret_access_key=self.settings.payload_s3_secret_key.get_secret_value(),
+                config=self.boto_config,
+            ) as s3_client:
+                # 写入 prompt.json
+                await s3_client.put_object(
+                    Bucket=self.settings.payload_bucket_name,
+                    Key=f"{prefix}/prompt.json",
+                    Body=json.dumps(prompt, ensure_ascii=False).encode("utf-8"),
+                )
+                # 写入 response.json
+                await s3_client.put_object(
+                    Bucket=self.settings.payload_bucket_name,
+                    Key=f"{prefix}/response.json",
+                    Body=json.dumps(response, ensure_ascii=False).encode("utf-8"),
+                )
+            return True
+        except Exception as e:
+            logger.warning("MinIO write failed for %s: %s", request_id, e)
+            return False
+
+    async def read_payload(
+        self,
+        request_id: str,
+        date: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """从 MinIO S3 读取（保持现有行为）"""
+        # ... 现有读取逻辑 ...
+        pass
+
+    async def health_check(self) -> bool:
+        """MinIO 健康检查"""
+        try:
+            async with self.session.client(
+                "s3",
+                endpoint_url=self.settings.payload_s3_endpoint,
+                # ... credentials ...
+            ) as s3_client:
+                await s3_client.list_buckets()
+            return True
+        except Exception:
+            return False
+```
+
+#### 4.2.4 VictoriaLogs 子类实现 (`app/core/backends/victorialogs_backend.py`)
+
+```python
+"""VictoriaLogs Payload 后端实现"""
+
+import json
+import logging
+from typing import Any
+
+import httpx
+
+from app.core.config import Settings
+from app.core.payload_backend import PayloadBackend
+
+logger = logging.getLogger(__name__)
+
+
+class VictoriaLogsBackend(PayloadBackend):
+    """VictoriaLogs 存储后端"""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.endpoint = settings.victorialogs_url.rstrip("/")
+        self.timeout = httpx.Timeout(10.0, connect=5.0)
+
+    async def write_payload(
+        self,
+        request_id: str,
+        prompt: dict[str, Any],
+        response: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> bool:
+        """写入 VictoriaLogs（JSONLine 格式）"""
+        log_entry = {
+            "_time": metadata.get("timestamp", ""),
+            "_stream": '{env="prod",service="litellm",type="payload"}',
+            "_msg": f"LLM 调用日志: request_id={request_id}, model={metadata.get('model', 'unknown')}, status={metadata.get('status_code', 0)}",
+            "env": "prod",
+            "service": "litellm",
+            "type": "payload",
+            "request_id": request_id,
+            "model": metadata.get("model", ""),
+            "key_alias": metadata.get("key_alias", ""),
+            "status_code": metadata.get("status_code", 0),
+            "latency_ms": metadata.get("latency_ms", 0),
+            "prompt_tokens": metadata.get("prompt_tokens", 0),
+            "completion_tokens": metadata.get("completion_tokens", 0),
+            "total_tokens": metadata.get("total_tokens", 0),
+            "spend": metadata.get("spend", 0.0),
+            "prompt": json.dumps(prompt, ensure_ascii=False),
+            "response": json.dumps(response, ensure_ascii=False),
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/insert/jsonline",
+                    content=json.dumps(log_entry, ensure_ascii=False),
+                    headers={"Content-Type": "application/stream+json"},
+                )
+                return resp.status_code == 200
+        except Exception as e:
+            logger.warning("VictoriaLogs write failed for %s: %s", request_id, e)
+            return False
+
+    async def read_payload(
+        self,
+        request_id: str,
+        date: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """从 VictoriaLogs 查询（LogsQL）"""
+        query = f'env: "prod" AND type: "payload" AND request_id: "{request_id}"'
+        if date:
+            query += f' AND _time: {date}'
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/select/logsql/query",
+                    data={"query": query, "limit": "1"},
+                )
+                if resp.status_code != 200:
+                    return {}, {}
+
+                lines = resp.text.strip().split("\n")
+                if not lines or not lines[0]:
+                    return {}, {}
+
+                data = json.loads(lines[0])
+                prompt = json.loads(data.get("prompt", "{}"))
+                response = json.loads(data.get("response", "{}"))
+                return prompt, response
+        except Exception as e:
+            logger.warning("VictoriaLogs read failed for %s: %s", request_id, e)
+            return {}, {}
+
+    async def health_check(self) -> bool:
+        """VictoriaLogs 健康检查"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.get(f"{self.endpoint}/health")
+                return resp.status_code == 200
+        except Exception:
+            return False
+```
+
+#### 4.2.5 工厂模式与配置切换 (`app/core/backends/factory.py`)
+
+```python
+"""Payload 后端工厂"""
+
+from app.core.config import Settings
+from app.core.payload_backend import PayloadBackend
+from app.core.backends.minio_backend import MinIOBackend
+from app.core.backends.victorialogs_backend import VictoriaLogsBackend
+
+
+def get_payload_backend(settings: Settings) -> PayloadBackend:
+    """根据配置获取 Payload 后端实例"""
+    backend_type = getattr(settings, "payload_backend", "minio").lower()
+
+    if backend_type == "victorialogs":
+        return VictoriaLogsBackend(settings)
+    elif backend_type == "minio":
+        return MinIOBackend(settings)
+    else:
+        raise ValueError(f"Unknown payload backend: {backend_type}")
+
+
+def get_dual_write_backend(settings: Settings) -> PayloadBackend:
+    """获取双写后端（灰度期使用）"""
+    primary = MinIOBackend(settings)
+    secondary = VictoriaLogsBackend(settings)
+    return DualWriteBackend(primary, secondary)
+```
+
+#### 4.2.6 双写后端（灰度期对比）(`app/core/backends/dual_write_backend.py`)
+
+```python
+"""双写后端：主写 + 异步副写，用于灰度期数据对比"""
+
+import asyncio
+import logging
+from typing import Any
+
+from app.core.payload_backend import PayloadBackend
+
+logger = logging.getLogger(__name__)
+
+
+class DualWriteBackend(PayloadBackend):
+    """双写后端：主写 MinIO，异步副写 VictoriaLogs"""
+
+    def __init__(self, primary: PayloadBackend, secondary: PayloadBackend) -> None:
+        self.primary = primary
+        self.secondary = secondary
+
+    async def write_payload(
+        self,
+        request_id: str,
+        prompt: dict[str, Any],
+        response: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> bool:
+        """主写 + 异步副写"""
+        # 主写（阻塞，确保成功）
+        primary_ok = await self.primary.write_payload(
+            request_id, prompt, response, metadata
+        )
+
+        # 异步副写（不阻塞主流程）
+        asyncio.create_task(
+            self._secondary_write(request_id, prompt, response, metadata)
+        )
+
+        return primary_ok
+
+    async def _secondary_write(
+        self,
+        request_id: str,
+        prompt: dict[str, Any],
+        response: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> None:
+        """异步副写，失败只记日志"""
+        try:
+            ok = await self.secondary.write_payload(
+                request_id, prompt, response, metadata
+            )
+            if not ok:
+                logger.warning("Secondary write failed for %s", request_id)
+        except Exception as e:
+            logger.warning("Secondary write error for %s: %s", request_id, e)
+
+    async def read_payload(
+        self,
+        request_id: str,
+        date: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """优先从主后端读取"""
+        return await self.primary.read_payload(request_id, date)
+
+    async def health_check(self) -> bool:
+        """双后端健康检查"""
+        primary_ok = await self.primary.health_check()
+        secondary_ok = await self.secondary.health_check()
+        return primary_ok and secondary_ok
+```
+
+#### 4.2.7 配置项扩展 (`app/core/config.py`)
+
+```python
+class Settings(BaseSettings):
+    # ... 现有配置 ...
+
+    # Payload 后端配置
+    payload_backend: str = "minio"  # minio / victorialogs / dual
+    victorialogs_url: str = "http://100.95.20.57:9428"  # Starfive Tailscale
+    victorialogs_timeout: float = 10.0
+
+    # 双写模式开关
+    enable_vlogs_dual_write: bool = False
+```
+
+#### 4.2.8 重构 `logging_hook.py` 与 `payload.py`
+
+**改造点**：
+1. 注入 `PayloadBackend` 依赖（通过 FastAPI `Depends`）；
+2. 替换直接调用 `aioboto3` 的代码为 `backend.write_payload()`；
+3. 替换 S3 查询逻辑为 `backend.read_payload()`；
+4. 保持接口签名不变，对调用方透明。
+
+```python
+# app/api/payload.py 改造示例
+from app.core.payload_backend import PayloadBackend
+from app.core.backends.factory import get_payload_backend
+
+@router.get("/logs/{request_id}/payload")
+async def get_request_payload(
+    request_id: str,
+    backend: PayloadBackend = Depends(get_payload_backend),  # ← 注入抽象基类
+) -> Any:
+    prompt, response = await backend.read_payload(request_id, date_str)
+    # ... 后续处理 ...
+```
+
+---
 
 ### Phase 7.3：存量数据迁移 (Historical Data Migration)
 编写自动化迁移脚本 `scripts/migrate_minio_to_vlogs.py`：
@@ -226,6 +638,18 @@ _stream: "{kubernetes.container_name=\"proxy\", kubernetes.namespace_name=\"kong
 2. 聚合对应目录下的 `prompt.json` 与 `response.json`，并从 OCI MySQL `llm_request_logs` 读取对应的调用元数据；
 3. 打包生成 JSONLine 格式数据流；
 4. 批量 `POST /insert/jsonline` 灌入 VictoriaLogs。
+
+**迁移脚本核心逻辑**：
+```python
+async def migrate_batch(minio_backend: MinIOBackend, vlogs_backend: VictoriaLogsBackend, request_ids: list[str]):
+    """批量迁移：从 MinIO 读取 → 转换格式 → 写入 VictoriaLogs"""
+    for rid in request_ids:
+        prompt, response = await minio_backend.read_payload(rid)
+        metadata = await fetch_metadata_from_mysql(rid)  # 从 MySQL 补全元数据
+        await vlogs_backend.write_payload(rid, prompt, response, metadata)
+```
+
+---
 
 ### Phase 7.4：MinIO 下线与存储回收 (Demise & Clean Up)
 1. 验证 Dashboard 报文穿透与关键字搜索 100% 正常；
