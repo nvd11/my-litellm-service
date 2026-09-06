@@ -72,7 +72,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             request_id: log.request_id,
             date: dateStr,
             prompt: { user_prompt: `（读取报文失败：HTTP ${res.status}）` },
-            response: { reply: "（此请求的原始报文未在 MinIO 归档或为旧版本历史调用）" },
+            response: { reply: "（此请求的原始报文未在存储中归档或为旧版本历史调用）" },
             prompt_url: log.prompt_url,
             response_url: log.response_url,
           });
@@ -255,7 +255,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
           {loading ? (
             <div className="py-20 text-center text-slate-500 flex flex-col items-center gap-2">
               <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              <span>正在从 NUC MinIO 读取原始 Payload...</span>
+              <span>正在从存储引擎读取原始 Payload...</span>
             </div>
           ) : activeTab === "formatted" ? (
             <div className="space-y-3.5">
@@ -665,7 +665,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                             className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-center font-medium transition-all disabled:opacity-50"
                           >
                             {loadingFull
-                              ? "正在从 NUC MinIO 传输千条全量报文..."
+                              ? "正在从存储引擎传输千条全量报文..."
                               : `⚡ 当前为秒开精简预览，点击加载完整全部 ${(payloadData?.prompt as any)?.total_messages_count} 条历史消息`}
                           </button>
                         </div>
