@@ -121,6 +121,6 @@ async def test_victorialogs_backend_search_payloads_parsing(test_settings: Setti
         assert rids == ["rid-1", "rid-2"]  # 自动去重
         call_args = mock_client.post.call_args
         query_sent = call_args[1]["data"]["query"]
-        assert 'prompt_chunk:~"(?i)Python\\ error"' in query_sent
+        assert 'prompt_chunk:"Python error"' in query_sent
         assert "_time: 2026-09-06" in query_sent
         assert "limit 50" in query_sent

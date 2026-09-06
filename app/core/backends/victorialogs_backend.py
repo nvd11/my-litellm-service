@@ -231,11 +231,7 @@ class VictoriaLogsBackend(PayloadBackend):
         if not keyword or not keyword.strip():
             return []
 
-        import re
-
         clean_kw = keyword.strip()
-        escaped_kw = re.escape(clean_kw)
-
         query_parts = ['_stream:{type="payload"}']
 
         if start_date and end_date and start_date == end_date:
@@ -245,17 +241,23 @@ class VictoriaLogsBackend(PayloadBackend):
         elif end_date:
             query_parts.append(f"_time: <= {end_date}")
 
-        content_filter = (
-            f'(prompt_chunk:~"(?i){escaped_kw}" OR response:~"(?i){escaped_kw}" '
-            f'OR prompt:~"(?i){escaped_kw}")'
-        )
+        # 匹配 prompt_chunk 或 response (优先使用 VictoriaLogs 倒排分词索引，词组或含空格时加引号)
+        if " " in clean_kw:
+            quoted_kw = json.dumps(clean_kw, ensure_ascii=False)
+            content_filter = (
+                f"(prompt_chunk:{quoted_kw} OR response:{quoted_kw} OR prompt:{quoted_kw})"
+            )
+        else:
+            content_filter = (
+                f"(prompt_chunk:{clean_kw} OR response:{clean_kw} OR prompt:{clean_kw})"
+            )
         query_parts.append(content_filter)
 
-        limit_num = max(1, min(limit, 1000))
+        limit_num = max(1, min(limit, 200))
         full_query = f"{' AND '.join(query_parts)} | uniq by (request_id) | limit {limit_num}"
 
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
                 resp = await client.post(
                     f"{self.endpoint}/select/logsql/query",
                     data={"query": full_query},
