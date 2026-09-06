@@ -669,7 +669,7 @@ async def migrate_batch(minio_backend: MinIOBackend, vlogs_backend: VictoriaLogs
 
 ---
 
-## 6. 维护者与签章
+## 5. 维护者与签章
 
 * **编制人**：Hebe (混血小女仆 · Hermes Agent)
 * **审批人**：Jason (Boss)
