@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import case, desc, func, or_, select
 
+from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
+from app.core.payload_backend import PayloadBackend
 from app.db import get_async_engine, llm_request_logs
 
 router = APIRouter(tags=["Metrics"])
@@ -57,7 +59,11 @@ async def get_summary_metrics(
     model_used: str | None = Query(None, description="Filter by actual model used"),
     status_code: int | None = Query(None, description="Filter by HTTP status code"),
     search: str | None = Query(None, description="Keyword search in request_id or key alias"),
+    payload_search: str | None = Query(
+        None, description="Full-text search in prompt or response payload via VictoriaLogs"
+    ),
     settings: Settings = Depends(get_settings),
+    backend: PayloadBackend = Depends(get_payload_backend),
 ) -> Any:
     """Calculate daily summary statistics in HKT (requests, tokens, cost, latency, success rate).
 
@@ -75,6 +81,30 @@ async def get_summary_metrics(
         llm_request_logs.c.created_at >= start_dt,
         llm_request_logs.c.created_at <= end_dt,
     ]
+
+    # 若开启了 payload 全文搜索，优先通过 VictoriaLogs 倒排索引检索匹配的 request_id 列表
+    if payload_search and payload_search.strip():
+        date_str = eval_date.strftime("%Y-%m-%d")
+        matched_rids = await backend.search_payloads(
+            keyword=payload_search.strip(),
+            start_date=date_str,
+            end_date=date_str,
+            limit=500,
+        )
+        if not matched_rids:
+            return SummaryMetricsResponse(
+                date=eval_date.strftime("%Y-%m-%d"),
+                today_requests=0,
+                today_tokens=0,
+                today_cost_usd=0.0,
+                today_cost_cny=0.0,
+                avg_latency_ms=0,
+                success_rate=100.0,
+                active_keys=[],
+                models_breakdown=[],
+            )
+        conditions.append(llm_request_logs.c.request_id.in_(matched_rids))
+
     if api_key_alias and api_key_alias.strip():
         conditions.append(llm_request_logs.c.api_key_alias == api_key_alias.strip())
     if model_used and model_used.strip():

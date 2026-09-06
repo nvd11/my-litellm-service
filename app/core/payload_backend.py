@@ -5,7 +5,7 @@ from typing import Any
 
 
 class PayloadBackend(ABC):
-    """Payload 存储后端抽象基类，定义统一读写接口"""
+    """Payload 存储后端抽象基类，定义统一读写与检索接口"""
 
     @abstractmethod
     async def write_payload(
@@ -42,6 +42,27 @@ class PayloadBackend(ABC):
 
         Returns:
             tuple: (prompt_data, response_data)，不存在时返回空 dict
+        """
+        pass
+
+    @abstractmethod
+    async def search_payloads(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """全文检索 Prompt 和 Response 内容，返回匹配的 request_id 列表
+
+        Args:
+            keyword: 搜索关键词
+            start_date: 可选起始日期 (YYYY-MM-DD)
+            end_date: 可选截止日期 (YYYY-MM-DD)
+            limit: 最大返回请求数上限
+
+        Returns:
+            list[str]: 匹配的 request_id 列表
         """
         pass
 

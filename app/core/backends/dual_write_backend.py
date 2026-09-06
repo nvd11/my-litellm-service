@@ -73,6 +73,19 @@ class DualWriteBackend(PayloadBackend):
         """
         return await self.primary.read_payload(request_id, date)
 
+    async def search_payloads(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """优先使用支持检索的后端执行检索（若副后端支持则委派副后端）."""
+        res = await self.primary.search_payloads(keyword, start_date, end_date, limit)
+        if not res:
+            res = await self.secondary.search_payloads(keyword, start_date, end_date, limit)
+        return res
+
     async def health_check(self) -> bool:
         """双后端健康检查
 

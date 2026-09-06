@@ -16,9 +16,11 @@ interface LogsTableProps {
   page: number;
   onPageChange: (page: number) => void;
   pageSize: number;
-  onPageSizeChange: (size: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
   searchKeyword: string;
   onSearchChange: (val: string) => void;
+  payloadSearchKeyword: string;
+  onPayloadSearchChange: (val: string) => void;
   selectedKeyAlias: string;
   onKeyAliasChange: (val: string) => void;
   selectedModel: string;
@@ -38,6 +40,8 @@ export const LogsTable: React.FC<LogsTableProps> = ({
   onPageSizeChange,
   searchKeyword,
   onSearchChange,
+  payloadSearchKeyword,
+  onPayloadSearchChange,
   selectedKeyAlias,
   onKeyAliasChange,
   selectedModel,
@@ -103,6 +107,19 @@ export const LogsTable: React.FC<LogsTableProps> = ({
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
+            />
+          </div>
+
+          {/* Payload Full-Text Search Input */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-purple-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="⚡ 检索报文内容 (Prompt / Reply)..."
+              value={payloadSearchKeyword}
+              onChange={(e) => onPayloadSearchChange(e.target.value)}
+              className="w-full bg-purple-50/40 border border-purple-200/80 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 placeholder-purple-400/80 focus:outline-none focus:border-purple-500 font-medium"
+              title="使用 VictoriaLogs 高性能倒排索引在 Prompt 输入和模型回复文本中进行全文检索"
             />
           </div>
 
