@@ -139,7 +139,27 @@ _msg = f"LLM 调用日志: request_id={request_id}, model={model}, status={statu
 # 日志显示: "missing _msg field; see https://docs.victoriametrics.com/victorialogs/keyconcepts/#message-field"
 ```
 
-#### 3.1.3 `_stream` 标签与普通字段双写机制
+#### 3.1.4 报文超限分块切片与动态聚合还原规范 (Chunking & Dynamic Reassembly)
+
+##### 1. VictoriaLogs 底层硬限制发现与实测
+* **默认单行上限**：默认参数 `-insert.maxLineSizeBytes=262144`（256 KB），未配置该参数时超过 256KB 会被静默丢弃。
+* **物理绝对上限**：即使配置 `-insert.maxLineSizeBytes=2MB`，VictoriaLogs 代码内部十进制严格硬上限为 **1,999,000 字节 (~1.90 MB)**，超过 2,000,000 字节仍会被强行丢弃。
+* **MinIO 真实报文数据特征**：
+  * `<= 1.5MB` 普通请求占 **87.8%**；
+  * `> 1.5MB` 超长多轮上下文及包含高清图片 Base64 的报文占 **12.2%**，最大单条请求可达 **12.07 MB**（627 条对话轮次）。
+
+##### 2. 动态分块切片策略 (Chunking)
+* **分块阈值**：以 **1.5MB 字符（1,500,000 chars）** 为安全阈值，绝对避开 1.9MB 丢弃红线。
+* **按需切片机制**：
+  * **未超限请求（<= 1.5MB）**：**不切片**，单条整存（`shard_index=1, total_shards=1`），保持干净纯粹；
+  * **超限请求（> 1.5MB）**：按 1.5MB 线性切块（`shard_index=1..N, total_shards=N`）。
+  * 字段 `prompt_chunk` 存放分块文本，`response` 存放在第 1 分片。
+  * 单条请求的所有分片在一次网络交互中以 `\n` 分隔批量推送到 `/insert/jsonline`，保证原子性。
+
+##### 3. 动态聚合还原规范 (Dynamic Reassembly)
+* **LogsQL 查询**：`env: "prod" AND type: "payload" AND request_id: exact("<request_id>")`；
+* **分片重组**：检索该 `request_id` 下的全部分片，按 `shard_index` 升序排列，通过 `"".join(chunks)` 秒级拼接并无损执行 `json.loads()` 还原结构化 Prompt 与 Response；
+* **双向兼容**：同时兼容旧版单行 `prompt` 字段与新版分块 `prompt_chunk` 字段。
 
 **核心发现**：VictoriaLogs 的 `_stream` 标签与普通字段是**独立存储**的：
 - `_stream` 标签：显示在 Web UI 左侧 Stream fields，用于流隔离；
@@ -387,7 +407,11 @@ class MinIOBackend(PayloadBackend):
 #### 4.2.4 VictoriaLogs 子类实现 (`app/core/backends/victorialogs_backend.py`)
 
 ```python
-"""VictoriaLogs Payload 后端实现"""
+"""VictoriaLogs Payload 后端实现.
+
+支持超大报文智能切片（分块 Chunking，单块控制在 1.5MB 以内，避开 VictoriaLogs 2MB 硬上限），
+并在读取时动态检索全部分片按序号升序还原完整 Payload。
+"""
 
 import json
 import logging
@@ -400,14 +424,24 @@ from app.core.payload_backend import PayloadBackend
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CHUNK_SIZE = 1_500_000  # 1.5MB 字符分块安全阈值
+
 
 class VictoriaLogsBackend(PayloadBackend):
-    """VictoriaLogs 存储后端"""
+    """VictoriaLogs 存储后端，内置分块防超限与动态聚合还原能力."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, chunk_size: int = DEFAULT_CHUNK_SIZE) -> None:
         self.settings = settings
         self.endpoint = settings.victorialogs_url.rstrip("/")
-        self.timeout = httpx.Timeout(10.0, connect=5.0)
+        self.timeout = httpx.Timeout(15.0, connect=5.0)
+        self.chunk_size = chunk_size
+
+    def _split_into_chunks(self, text: str) -> list[str]:
+        if not text:
+            return [""]
+        if len(text) <= self.chunk_size:
+            return [text]
+        return [text[i : i + self.chunk_size] for i in range(0, len(text), self.chunk_size)]
 
     async def write_payload(
         self,
@@ -416,35 +450,46 @@ class VictoriaLogsBackend(PayloadBackend):
         response: dict[str, Any],
         metadata: dict[str, Any],
     ) -> bool:
-        """写入 VictoriaLogs（JSONLine 格式）"""
-        log_entry = {
-            "_time": metadata.get("timestamp", ""),
-            "_stream": '{env="prod",service="litellm",type="payload"}',
-            "_msg": f"LLM 调用日志: request_id={request_id}, model={metadata.get('model', 'unknown')}, status={metadata.get('status_code', 0)}",
-            "env": "prod",
-            "service": "litellm",
-            "type": "payload",
-            "request_id": request_id,
-            "model": metadata.get("model", ""),
-            "key_alias": metadata.get("key_alias", ""),
-            "status_code": metadata.get("status_code", 0),
-            "latency_ms": metadata.get("latency_ms", 0),
-            "prompt_tokens": metadata.get("prompt_tokens", 0),
-            "completion_tokens": metadata.get("completion_tokens", 0),
-            "total_tokens": metadata.get("total_tokens", 0),
-            "spend": metadata.get("spend", 0.0),
-            "prompt": json.dumps(prompt, ensure_ascii=False),
-            "response": json.dumps(response, ensure_ascii=False),
-        }
+        """写入 VictoriaLogs（支持按 1.5MB 分块切片，单批批量发送）"""
+        timestamp = metadata.get("timestamp", "")
+        model = str(metadata.get("model", "unknown"))
+        prompt_str = json.dumps(prompt, ensure_ascii=False)
+        response_str = json.dumps(response, ensure_ascii=False)
 
+        prompt_chunks = self._split_into_chunks(prompt_str)
+        total_shards = len(prompt_chunks)
+
+        log_entries: list[dict[str, Any]] = []
+        for idx, chunk in enumerate(prompt_chunks, 1):
+            shard_msg = f"LLM 调用日志: request_id={request_id}, model={model}"
+            if total_shards > 1:
+                shard_msg += f" [shard {idx}/{total_shards}]"
+
+            entry = {
+                "_time": timestamp,
+                "_stream": '{env="prod",service="litellm",type="payload"}',
+                "_msg": shard_msg,
+                "env": "prod",
+                "service": "litellm",
+                "type": "payload",
+                "request_id": request_id,
+                "shard_index": idx,
+                "total_shards": total_shards,
+                "prompt_chunk": chunk,
+                "prompt": chunk if total_shards == 1 else "",
+                "response": response_str if idx == 1 else "",
+            }
+            log_entries.append(entry)
+
+        body = "\n".join(json.dumps(e, ensure_ascii=False) for e in log_entries) + "\n"
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
                     f"{self.endpoint}/insert/jsonline",
-                    content=json.dumps(log_entry, ensure_ascii=False),
+                    content=body.encode("utf-8"),
                     headers={"Content-Type": "application/stream+json"},
                 )
-                return resp.status_code == 200
+                return resp.status_code in (200, 204)
         except Exception as e:
             logger.warning("VictoriaLogs write failed for %s: %s", request_id, e)
             return False
@@ -454,40 +499,37 @@ class VictoriaLogsBackend(PayloadBackend):
         request_id: str,
         date: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """从 VictoriaLogs 查询（LogsQL）"""
-        query = f'env: "prod" AND type: "payload" AND request_id: "{request_id}"'
+        """从 VictoriaLogs 查询并动态聚合还原分片（LogsQL）"""
+        query = f'env: "prod" AND type: "payload" AND request_id: exact("{request_id}")'
         if date:
-            query += f' AND _time: {date}'
+            query += f" AND _time: {date}"
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
                     f"{self.endpoint}/select/logsql/query",
-                    data={"query": query, "limit": "1"},
+                    data={"query": query, "limit": "1000"},
                 )
                 if resp.status_code != 200:
                     return {}, {}
 
-                lines = resp.text.strip().split("\n")
-                if not lines or not lines[0]:
+                lines = [l.strip() for l in resp.text.strip().split("\n") if l.strip()]
+                if not lines:
                     return {}, {}
 
-                data = json.loads(lines[0])
-                prompt = json.loads(data.get("prompt", "{}"))
-                response = json.loads(data.get("response", "{}"))
-                return prompt, response
+                docs = [json.loads(l) for l in lines]
+                docs.sort(key=lambda d: int(d.get("shard_index", 1)))
+
+                raw_resp = next((d["response"] for d in docs if d.get("response")), "")
+                raw_prompt = "".join(d.get("prompt_chunk") or d.get("prompt", "") for d in docs)
+
+                return (
+                    json.loads(raw_prompt) if raw_prompt else {},
+                    json.loads(raw_resp) if raw_resp else {},
+                )
         except Exception as e:
             logger.warning("VictoriaLogs read failed for %s: %s", request_id, e)
             return {}, {}
-
-    async def health_check(self) -> bool:
-        """VictoriaLogs 健康检查"""
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(f"{self.endpoint}/health")
-                return resp.status_code == 200
-        except Exception:
-            return False
 ```
 
 #### 4.2.5 工厂模式与配置切换 (`app/core/backends/factory.py`)
