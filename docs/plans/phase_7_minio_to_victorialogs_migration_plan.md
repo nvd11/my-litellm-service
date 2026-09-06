@@ -5,6 +5,8 @@
 > 👤 **架构设计**：Jason (Boss) & Hebe (小女仆兼秘书)  
 > 📌 **方案定位**：生产级演进规划（Phase 7 Implementation Plan）
 
+* **相关历史规划**：原设计基于 DuckDB 边缘扫描微服务的方案已归档废弃，参见 [`phase_7_nuc_edge_duckdb_search_service_plan_outdated.md`](./phase_7_nuc_edge_duckdb_search_service_plan_outdated.md)。
+
 ---
 
 ## 1. 演进背景与痛点复盘 (Why We Migrate)
