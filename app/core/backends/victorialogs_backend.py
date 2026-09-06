@@ -174,19 +174,32 @@ class VictoriaLogsBackend(PayloadBackend):
                 if not parsed_docs:
                     return {}, {}
 
-                # 动态排序分片
-                parsed_docs.sort(key=lambda d: int(d.get("shard_index", 1)))
-
-                # 提取 response (优先从第1片或带response字段的记录提取)
-                raw_response_str = ""
+                # 1. 严格按 shard_index 去重（避免重试写入产生相同分片）
+                unique_shards: dict[int, dict[str, Any]] = {}
                 for d in parsed_docs:
+                    idx = int(d.get("shard_index", 1))
+                    if idx not in unique_shards or len(
+                        d.get("prompt_chunk") or d.get("prompt") or ""
+                    ) >= len(
+                        unique_shards[idx].get("prompt_chunk")
+                        or unique_shards[idx].get("prompt")
+                        or ""
+                    ):
+                        unique_shards[idx] = d
+
+                # 2. 动态排序分片 (1..N)
+                sorted_shards = [unique_shards[k] for k in sorted(unique_shards.keys())]
+
+                # 3. 提取 response (优先从第1片或带response字段的记录提取)
+                raw_response_str = ""
+                for d in sorted_shards:
                     if d.get("response"):
                         raw_response_str = d["response"]
                         break
 
-                # 拼接 prompt 分片 (支持新格式 prompt_chunk 与兼容旧格式 prompt)
+                # 4. 拼接 prompt 分片 (支持新格式 prompt_chunk 与兼容旧格式 prompt)
                 prompt_parts: list[str] = []
-                for d in parsed_docs:
+                for d in sorted_shards:
                     chunk = d.get("prompt_chunk") or d.get("prompt") or ""
                     if chunk:
                         prompt_parts.append(chunk)
