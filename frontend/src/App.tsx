@@ -25,6 +25,7 @@ export const App: React.FC = () => {
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(20);
   const [searchKeyword, setSearchKeyword] = useState<string>("");
+  const [payloadSearchKeyword, setPayloadSearchKeyword] = useState<string>("");
   const [selectedKeyAlias, setSelectedKeyAlias] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [selectedStatusCode, setSelectedStatusCode] = useState<string>("");
@@ -38,6 +39,9 @@ export const App: React.FC = () => {
       const params = new URLSearchParams({ date: selectedDate });
       if (searchKeyword.trim()) {
         params.append("search", searchKeyword.trim());
+      }
+      if (payloadSearchKeyword.trim()) {
+        params.append("payload_search", payloadSearchKeyword.trim());
       }
       if (selectedKeyAlias.trim()) {
         params.append("api_key_alias", selectedKeyAlias.trim());
@@ -56,7 +60,7 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error("Failed to fetch metrics:", err);
     }
-  }, [selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
+  }, [selectedDate, searchKeyword, payloadSearchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
 
   // Fetch logs
   const fetchLogs = useCallback(async () => {
@@ -71,6 +75,9 @@ export const App: React.FC = () => {
 
       if (searchKeyword.trim()) {
         params.append("search", searchKeyword.trim());
+      }
+      if (payloadSearchKeyword.trim()) {
+        params.append("payload_search", payloadSearchKeyword.trim());
       }
       if (selectedKeyAlias.trim()) {
         params.append("api_key_alias", selectedKeyAlias.trim());
@@ -92,7 +99,7 @@ export const App: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, selectedDate, searchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
+  }, [page, pageSize, selectedDate, searchKeyword, payloadSearchKeyword, selectedKeyAlias, selectedModel, selectedStatusCode]);
 
   // Initial load and auto refresh
   useEffect(() => {
@@ -137,6 +144,7 @@ export const App: React.FC = () => {
           loading={loading}
           hasActiveFilters={Boolean(
             searchKeyword.trim() ||
+              payloadSearchKeyword.trim() ||
               selectedKeyAlias.trim() ||
               selectedModel.trim() ||
               selectedStatusCode.trim()
@@ -155,8 +163,13 @@ export const App: React.FC = () => {
             setPage(1);
           }}
           searchKeyword={searchKeyword}
-          onSearchChange={(s) => {
-            setSearchKeyword(s);
+          onSearchChange={(k) => {
+            setSearchKeyword(k);
+            setPage(1);
+          }}
+          payloadSearchKeyword={payloadSearchKeyword}
+          onPayloadSearchChange={(k) => {
+            setPayloadSearchKeyword(k);
             setPage(1);
           }}
           selectedKeyAlias={selectedKeyAlias}

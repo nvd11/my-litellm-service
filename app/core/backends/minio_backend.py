@@ -141,6 +141,17 @@ class MinIOBackend(PayloadBackend):
             response_data = {"reply": "（无法从 NUC MinIO 读取回复报文）"}
             return prompt_data, response_data
 
+    async def search_payloads(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """MinIO 不原生支持全文倒排检索，返回空列表."""
+        logger.debug("search_payloads is not natively supported by MinIOBackend")
+        return []
+
     async def health_check(self) -> bool:
         """MinIO 健康检查
 

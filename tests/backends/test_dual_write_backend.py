@@ -49,6 +49,15 @@ class MockBackend(PayloadBackend):
         )
         return self.read_result
 
+    async def search_payloads(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        return ["req-search-found"]
+
     async def health_check(self) -> bool:
         return True
 

@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 
+from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
+from app.core.payload_backend import PayloadBackend
 from app.db import get_async_engine, llm_request_logs
 
 router = APIRouter(tags=["Audit Logs"])
@@ -60,13 +62,38 @@ async def list_audit_logs(
     model_used: str | None = Query(None, description="Filter by actual model used"),
     status_code: int | None = Query(None, description="Filter by HTTP status code"),
     search: str | None = Query(None, description="Keyword search in request_id or key alias"),
+    payload_search: str | None = Query(
+        None, description="Full-text search in prompt or response payload via VictoriaLogs"
+    ),
     settings: Settings = Depends(get_settings),
+    backend: PayloadBackend = Depends(get_payload_backend),
 ) -> Any:
     """Retrieve paginated audit logs with multi-condition filters and S3 hyperlinks in HKT."""
     engine = get_async_engine(settings)
 
     # 1. 构造过滤条件列表 (将前端传入的 HKT 日期区间映射为 MySQL 底层的 UTC 存储区间)
     conditions: list[Any] = []
+
+    # 若开启了 payload 全文搜索，优先通过 VictoriaLogs 倒排索引检索匹配的 request_id 列表
+    if payload_search and payload_search.strip():
+        s_date = start_date.strftime("%Y-%m-%d") if start_date else None
+        e_date = end_date.strftime("%Y-%m-%d") if end_date else None
+        matched_rids = await backend.search_payloads(
+            keyword=payload_search.strip(),
+            start_date=s_date,
+            end_date=e_date,
+            limit=500,
+        )
+        if not matched_rids:
+            # 未搜到任何匹配的报文，直接返回空列表
+            return PaginatedLogsResponse(
+                items=[],
+                total=0,
+                page=page,
+                page_size=page_size,
+                total_pages=0,
+            )
+        conditions.append(llm_request_logs.c.request_id.in_(matched_rids))
 
     if start_date:
         start_min = datetime.combine(start_date, datetime.min.time()) - timedelta(hours=8)

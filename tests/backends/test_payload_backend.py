@@ -8,33 +8,26 @@ from app.core.payload_backend import PayloadBackend
 class ConcreteBackend(PayloadBackend):
     """测试用具体实现类"""
 
-    async def write_payload(
-        self,
-        request_id: str,
-        prompt: dict,
-        response: dict,
-        metadata: dict,
-    ) -> bool:
+    async def write_payload(self, request_id, prompt, response, metadata):
         return True
 
-    async def read_payload(
-        self,
-        request_id: str,
-        date: str | None = None,
-    ) -> tuple[dict, dict]:
-        return {"prompt": "test"}, {"response": "test"}
+    async def read_payload(self, request_id, date=None):
+        return {"user_prompt": "test"}, {"reply": "test"}
 
-    async def health_check(self) -> bool:
+    async def search_payloads(self, keyword, start_date=None, end_date=None, limit=500):
+        return ["test-req-id"]
+
+    async def health_check(self):
         return True
 
 
 class TestPayloadBackend:
-    """PayloadBackend 抽象基类测试"""
+    """PayloadBackend 接口测试"""
 
-    def test_cannot_instantiate_abstract_class(self):
+    def test_abstract_class_cannot_instantiate(self):
         """抽象基类不能直接实例化"""
         with pytest.raises(TypeError):
-            PayloadBackend()
+            PayloadBackend()  # type: ignore
 
     def test_concrete_implementation(self):
         """具体实现类可以实例化"""
@@ -47,9 +40,9 @@ class TestPayloadBackend:
         backend = ConcreteBackend()
         result = await backend.write_payload(
             request_id="test-123",
-            prompt={"test": "prompt"},
-            response={"test": "response"},
-            metadata={"model": "test-model"},
+            prompt={"user_prompt": "test"},
+            response={"reply": "test"},
+            metadata={"model": "test"},
         )
         assert result is True
 
@@ -57,12 +50,16 @@ class TestPayloadBackend:
     async def test_read_payload_interface(self):
         """read_payload 接口签名正确"""
         backend = ConcreteBackend()
-        prompt, response = await backend.read_payload(
-            request_id="test-123",
-            date="2026-09-06",
-        )
-        assert prompt == {"prompt": "test"}
-        assert response == {"response": "test"}
+        prompt, response = await backend.read_payload("test-123")
+        assert prompt == {"user_prompt": "test"}
+        assert response == {"reply": "test"}
+
+    @pytest.mark.asyncio
+    async def test_search_payloads_interface(self):
+        """search_payloads 接口签名正确"""
+        backend = ConcreteBackend()
+        rids = await backend.search_payloads("test-kw")
+        assert rids == ["test-req-id"]
 
     @pytest.mark.asyncio
     async def test_health_check_interface(self):

@@ -21,6 +21,9 @@ class MockBackend(PayloadBackend):
     async def read_payload(self, request_id, date=None):
         return self.read_result
 
+    async def search_payloads(self, keyword, start_date=None, end_date=None, limit=500):
+        return ["test-123"]
+
     async def health_check(self):
         return True
 

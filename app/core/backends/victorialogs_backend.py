@@ -214,6 +214,73 @@ class VictoriaLogsBackend(PayloadBackend):
             logger.warning("VictoriaLogs read failed for %s: %s", request_id, e)
             return {}, {}
 
+    async def search_payloads(
+        self,
+        keyword: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """全文检索 Prompt 和 Response 内容，返回匹配的 request_id 列表.
+
+        构建带时间区间与全文检索过滤的 LogsQL:
+        _stream:{type="payload"} AND (prompt_chunk:~"(?i)<keyword>" OR response:~"(?i)<keyword>")
+        | uniq by (request_id)
+        | limit <limit>
+        """
+        if not keyword or not keyword.strip():
+            return []
+
+        import re
+
+        clean_kw = keyword.strip()
+        escaped_kw = re.escape(clean_kw)
+
+        query_parts = ['_stream:{type="payload"}']
+
+        if start_date and end_date and start_date == end_date:
+            query_parts.append(f"_time: {start_date}")
+        elif start_date:
+            query_parts.append(f"_time: [{start_date}, {end_date or 'now'}]")
+        elif end_date:
+            query_parts.append(f"_time: <= {end_date}")
+
+        content_filter = (
+            f'(prompt_chunk:~"(?i){escaped_kw}" OR response:~"(?i){escaped_kw}" '
+            f'OR prompt:~"(?i){escaped_kw}")'
+        )
+        query_parts.append(content_filter)
+
+        limit_num = max(1, min(limit, 1000))
+        full_query = f"{' AND '.join(query_parts)} | uniq by (request_id) | limit {limit_num}"
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/select/logsql/query",
+                    data={"query": full_query},
+                )
+                if resp.status_code != 200:
+                    logger.warning(
+                        "VictoriaLogs search_payloads failed: status=%s", resp.status_code
+                    )
+                    return []
+
+                lines = [line.strip() for line in resp.text.strip().split("\n") if line.strip()]
+                matched_rids: list[str] = []
+                for line in lines:
+                    try:
+                        doc = json.loads(line)
+                        rid = doc.get("request_id")
+                        if rid and rid not in matched_rids:
+                            matched_rids.append(rid)
+                    except Exception:
+                        pass
+                return matched_rids
+        except Exception as e:
+            logger.warning("VictoriaLogs search_payloads exception: %s", e)
+            return []
+
     async def health_check(self) -> bool:
         """VictoriaLogs 健康检查.
 
