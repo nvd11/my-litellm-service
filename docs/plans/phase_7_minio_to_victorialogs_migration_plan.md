@@ -77,7 +77,7 @@ VictoriaLogs 原生支持以 JSON 流式追加写入。在 `app/core/logging_hoo
 ```json
 {
   "_time": "2026-09-06T05:32:46.000Z",
-  "_stream": "{env=\"prod\",service=\"litellm-gateway\"}",
+  "_stream": "{env=\"prod\",service=\"litellm\",type=\"payload\"}",
   "request_id": "req-9c8f2b3e-5a12-4d3a-b8e7-112233445566",
   "model": "gemini-3.8-flash",
   "key_alias": "yui-radxa",
@@ -96,17 +96,54 @@ VictoriaLogs 原生支持以 JSON 流式追加写入。在 `app/core/logging_hoo
 ```
 
 * **`_time`**：精确到毫秒的时间戳，VictoriaLogs 依此自动进行时序分区与生命周期淘汰；
-* **`_stream`**：流标签，定义物理流隔离；
+* **`_stream`**：流标签，定义物理流隔离，**采用方案 B 三层标签设计**：
+  * `env="prod"`：环境标识（prod / staging / dev）；
+  * `service="litellm"`：服务标识（litellm / fastapi / quarkus 等）；
+  * `type="payload"`：数据类型标识（payload / metric / trace），**核心区分字段**，用于隔离 LLM 报文与 K3s 系统日志；
 * **其他所有字段**：自动作为高吞吐列式字段存储，`prompt` 与 `response` 自动纳入流式倒排全文分词索引。
+
+#### 3.1.1 `_stream` 流标签设计规范（方案 B）
+
+VictoriaLogs 使用 `_stream` 字段实现多租户逻辑隔离，本系统采用三层标签设计：
+
+| 标签 | 取值示例 | 作用 | 基数 |
+| :--- | :--- | :--- | :--- |
+| `env` | `prod` / `staging` / `dev` | 环境隔离 | 低（~3） |
+| `service` | `litellm` / `fastapi` / `quarkus` | 服务隔离 | 低（~5） |
+| `type` | `payload` / `metric` / `trace` | **数据类型隔离（核心）** | 低（~3） |
+
+**设计原则**：
+1. **低基数优先**：`_stream` 标签组合数应控制在 100 以内，避免高基数导致索引膨胀；
+2. **type 为核心区分字段**：K3s 系统日志由 Fluent Bit 自动采集，`_stream` 为 `{kubernetes.container_name="...", ...}`；LLM Payload 使用 `{env="prod", service="litellm", type="payload"}`，两者天然隔离；
+3. **查询时显式指定**：所有 LogsQL 查询必须显式包含 `_stream` 过滤，避免误查系统日志。
+
+**与 K3s 系统日志的区分**：
+
+| 数据类型 | `_stream` 示例 | 采集方式 |
+| :--- | :--- | :--- |
+| **K3s 系统日志** | `{kubernetes.container_name="proxy", kubernetes.namespace_name="kong-system", kubernetes.pod_name="kong-ingress-controller-kong-hksgp"}` | Fluent Bit DaemonSet 自动采集，注入 K8s 元数据 |
+| **LLM Payload** | `{env="prod", service="litellm", type="payload"}` | 应用代码主动上报，自定义业务标签 |
+
+**查询示例**：
+```sql
+-- ✅ 正确：只查 LLM Payload，排除 K3s 系统日志
+_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND model: "kimi-k3"
+
+-- ❌ 错误：未指定 _stream，可能误查系统日志
+model: "kimi-k3"
+
+-- ✅ 正确：查 K3s 系统日志（调试用）
+_stream: "{kubernetes.container_name=\"proxy\", kubernetes.namespace_name=\"kong-system\"}"
+```
 
 ### 3.2 检索场景与 LogsQL 映射
 
 | 业务场景 | 前端 API 路由 | 底层 VictoriaLogs LogsQL 语句 |
 | :--- | :--- | :--- |
-| **根据 ID 点查报文** | `GET /api/logs/{request_id}/payload` | `request_id: "req-xxx"` |
-| **关键字搜 Prompt** | `GET /api/logs?q={keyword}` | `_time: 7d AND prompt: "广发信用卡"` |
-| **模型耗时分布统计** | `GET /api/metrics/latency-dist` | `_time: 24h \| stats by (model) quantile(0.5, latency_ms) as p50, quantile(0.99, latency_ms) as p99` |
-| **各 Agent 花销排行** | `GET /api/metrics/top-spenders` | `_time: 30d \| stats by (key_alias) sum(spend) as total_spend \| sort by (total_spend) desc` |
+| **根据 ID 点查报文** | `GET /api/logs/{request_id}/payload` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND request_id: "req-xxx"` |
+| **关键字搜 Prompt** | `GET /api/logs?q={keyword}` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 7d AND prompt: "广发信用卡"` |
+| **模型耗时分布统计** | `GET /api/metrics/latency-dist` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 24h \| stats by (model) quantile(0.5, latency_ms) as p50, quantile(0.99, latency_ms) as p99` |
+| **各 Agent 花销排行** | `GET /api/metrics/top-spenders` | `_stream: "{env=\"prod\", service=\"litellm\", type=\"payload\"}" AND _time: 30d \| stats by (key_alias) sum(spend) as total_spend \| sort by (total_spend) desc` |
 
 ---
 
