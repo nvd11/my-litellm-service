@@ -3,15 +3,15 @@
 from app.core.backends.dual_write_backend import DualWriteBackend
 from app.core.backends.minio_backend import MinIOBackend
 from app.core.backends.victorialogs_backend import VictoriaLogsBackend
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.payload_backend import PayloadBackend
 
 
-def get_payload_backend(settings: Settings) -> PayloadBackend:
+def get_payload_backend(settings: Settings | None = None) -> PayloadBackend:
     """根据配置获取 Payload 后端实例
 
     Args:
-        settings: 应用配置
+        settings: 可选应用配置，默认调用 get_settings()
 
     Returns:
         PayloadBackend: 后端实例
@@ -19,14 +19,15 @@ def get_payload_backend(settings: Settings) -> PayloadBackend:
     Raises:
         ValueError: 未知的后端类型
     """
-    backend_type = getattr(settings, "payload_backend", "minio").lower()
+    resolved_settings = settings or get_settings()
+    backend_type = getattr(resolved_settings, "payload_backend", "minio").lower()
 
     if backend_type == "victorialogs":
-        return VictoriaLogsBackend(settings)
+        return VictoriaLogsBackend(resolved_settings)
     elif backend_type == "minio":
-        return MinIOBackend(settings)
+        return MinIOBackend(resolved_settings)
     elif backend_type == "dual":
-        return get_dual_write_backend(settings)
+        return get_dual_write_backend(resolved_settings)
     else:
         raise ValueError(f"Unknown payload backend: {backend_type}")
 
