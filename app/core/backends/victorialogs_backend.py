@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 # 单块日志大小上限 (1.5MB 字符，严格避开 VictoriaLogs 1.9MB/2MB 硬限制)
 DEFAULT_CHUNK_SIZE = 1_500_000
 
+# VictoriaLogs 单行硬上限 (1.9MB，实际为 1,999,000 字节)
+# 预留 99KB 给 metadata 和 JSON 结构开销
+SAFE_SINGLE_ENTRY_LIMIT = 1_900_000
+
 
 class VictoriaLogsBackend(PayloadBackend):
     """VictoriaLogs 存储后端，内置分块防超限与动态聚合还原能力."""
@@ -26,11 +30,13 @@ class VictoriaLogsBackend(PayloadBackend):
         self,
         settings: Settings,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
+        safe_single_entry_limit: int = SAFE_SINGLE_ENTRY_LIMIT,
     ) -> None:
         self.settings = settings
         self.endpoint = settings.victorialogs_url.rstrip("/")
         self.timeout = httpx.Timeout(15.0, connect=5.0)
         self.chunk_size = chunk_size
+        self.safe_single_entry_limit = safe_single_entry_limit
 
     def _split_into_chunks(self, text: str) -> list[str]:
         """将长字符串按 chunk_size 拆分成连续分片列表."""
@@ -71,7 +77,27 @@ class VictoriaLogsBackend(PayloadBackend):
         prompt_str = json.dumps(prompt, ensure_ascii=False)
         response_str = json.dumps(response, ensure_ascii=False)
 
-        prompt_chunks = self._split_into_chunks(prompt_str)
+        # 关键修复：检查单条日志总大小（prompt + response + metadata 开销）
+        # 如果总大小超过安全阈值，即使 prompt 本身 <= chunk_size 也要强制分块
+        metadata_overhead = 500  # metadata 字段约 500 字符
+        single_entry_total_size = len(prompt_str) + len(response_str) + metadata_overhead
+
+        if single_entry_total_size > self.safe_single_entry_limit:
+            # 总大小超限，强制分块（即使 prompt 本身可能 <= chunk_size）
+            # 使用更保守的 chunk_size 确保每片加上 metadata 后仍低于硬上限
+            conservative_chunk_size = self.chunk_size - len(response_str) - metadata_overhead
+            if conservative_chunk_size <= 0:
+                # response 本身太大，使用更小的 chunk_size 确保能分块
+                # 至少保证每片 prompt 不超过 chunk_size 的一半
+                conservative_chunk_size = max(1, self.chunk_size // 2)
+            prompt_chunks = [
+                prompt_str[i : i + conservative_chunk_size]
+                for i in range(0, len(prompt_str), conservative_chunk_size)
+            ]
+        else:
+            # 总大小安全，使用标准分块逻辑
+            prompt_chunks = self._split_into_chunks(prompt_str)
+
         total_shards = len(prompt_chunks)
 
         log_entries: list[dict[str, Any]] = []
