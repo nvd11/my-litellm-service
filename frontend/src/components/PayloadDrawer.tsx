@@ -33,6 +33,10 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   const [loadingFull, setLoadingFull] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Raw JSON 延迟渲染状态：只在用户点击时才执行 JSON.stringify
+  const [rawJsonRendered, setRawJsonRendered] = useState<boolean>(false);
+  const [rawJsonContent, setRawJsonContent] = useState<string>("");
+
   // 折叠控制状态：key 为 section 名称或 "msg-{index}"，value 为 true 表示已收起/折叠
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -56,6 +60,8 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
   useEffect(() => {
     if (!log) {
       setPayloadData(null);
+      setRawJsonRendered(false);
+      setRawJsonContent("");
       return;
     }
 
@@ -67,6 +73,17 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
         if (res.ok) {
           const data = await res.json();
           setPayloadData(data);
+
+          // 如果消息数量超过 10 条，默认折叠所有消息以提升性能
+          if (data?.prompt?.messages && data.prompt.messages.length > 10) {
+            const defaultCollapsed: Record<string, boolean> = {
+              messages: false, // 保持消息列表展开，但折叠每条消息
+            };
+            data.prompt.messages.forEach((_: any, idx: number) => {
+              defaultCollapsed[`msg-${idx}`] = true;
+            });
+            setCollapsed(defaultCollapsed);
+          }
         } else {
           setPayloadData({
             request_id: log.request_id,
@@ -94,6 +111,28 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
 
     fetchPayload();
   }, [log]);
+
+  // 当切换到 Raw JSON 标签页时，延迟渲染 JSON 内容
+  useEffect(() => {
+    if (activeTab === "raw" && payloadData && !rawJsonRendered) {
+      // 使用 setTimeout 让浏览器先渲染加载动画，再执行耗时的 JSON.stringify
+      const timer = setTimeout(() => {
+        const content = JSON.stringify(
+          rawTab === "prompt" ? payloadData?.prompt : payloadData?.response,
+          null,
+          2
+        );
+        setRawJsonContent(content);
+        setRawJsonRendered(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, payloadData, rawTab, rawJsonRendered]);
+
+  // 当切换 rawTab 时，重置渲染状态
+  useEffect(() => {
+    setRawJsonRendered(false);
+  }, [rawTab]);
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -256,6 +295,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
             <div className="py-20 text-center text-slate-500 flex flex-col items-center gap-2">
               <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               <span>正在从存储引擎读取原始 Payload...</span>
+              <span className="text-[10px] text-slate-400">大报文可能需要几秒钟时间</span>
             </div>
           ) : activeTab === "formatted" ? (
             <div className="space-y-3.5">
@@ -701,12 +741,12 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                 </button>
               </div>
 
-              {/* Raw JSON 展示区 */}
+              {/* Raw JSON 展示区 - 延迟渲染优化 */}
               <div className="relative">
                 <button
                   onClick={() =>
                     handleCopy(
-                      JSON.stringify(
+                      rawJsonContent || JSON.stringify(
                         rawTab === "prompt" ? payloadData?.prompt : payloadData?.response,
                         null,
                         2
@@ -714,7 +754,7 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                       "raw_json"
                     )
                   }
-                  className="absolute right-3 top-3 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center gap-1 shadow-sm"
+                  className="absolute right-3 top-3 px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center gap-1 shadow-sm z-10"
                 >
                   {copiedKey === "raw_json" ? (
                     <Check className="w-3 h-3 text-emerald-400" />
@@ -723,13 +763,18 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                   )}
                   {copiedKey === "raw_json" ? "已复制" : "复制代码"}
                 </button>
-                <pre className="bg-slate-900 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] font-mono text-slate-100 leading-relaxed max-h-[550px]">
-                  {JSON.stringify(
-                    rawTab === "prompt" ? payloadData?.prompt : payloadData?.response,
-                    null,
-                    2
-                  )}
-                </pre>
+                {!rawJsonRendered ? (
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-100 leading-relaxed max-h-[550px] flex items-center justify-center min-h-[200px]">
+                    <div className="flex flex-col items-center gap-2 text-slate-400">
+                      <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      <span>正在格式化 JSON...</span>
+                    </div>
+                  </div>
+                ) : (
+                  <pre className="bg-slate-900 p-4 rounded-xl border border-slate-800 overflow-x-auto text-[11px] font-mono text-slate-100 leading-relaxed max-h-[550px]">
+                    {rawJsonContent}
+                  </pre>
+                )}
               </div>
             </div>
           ) : (
