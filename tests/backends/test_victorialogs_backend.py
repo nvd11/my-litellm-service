@@ -36,7 +36,7 @@ class TestVictoriaLogsBackend:
         assert backend.settings is not None
         assert backend.endpoint == "http://localhost:9428"
         assert backend.timeout is not None
-        assert backend.chunk_size == 1_500_000
+        assert backend.chunk_size == 1_300_000
 
     @pytest.mark.asyncio
     async def test_write_payload_small_single_shard(self, backend: VictoriaLogsBackend):
