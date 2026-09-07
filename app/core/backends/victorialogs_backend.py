@@ -15,8 +15,11 @@ from app.core.payload_backend import PayloadBackend
 
 logger = logging.getLogger(__name__)
 
-# 单块日志大小上限 (1.5MB 字符，严格避开 VictoriaLogs 1.9MB/2MB 硬限制)
-DEFAULT_CHUNK_SIZE = 1_500_000
+# 单块日志大小上限 (字符数)
+# 注意：VictoriaLogs 限制的是字节数（1,999,000 bytes），不是字符数！
+# 根据实际测试，平均每个字符约 1.34 字节（中英文混合）
+# 为了安全，设置 chunk_size = 1,300,000 字符（约 1.74MB 字节），预留 200KB 给 metadata
+DEFAULT_CHUNK_SIZE = 1_300_000
 
 # VictoriaLogs 单行硬上限 (1.9MB，实际为 1,999,000 字节)
 # 预留 99KB 给 metadata 和 JSON 结构开销
