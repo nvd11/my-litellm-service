@@ -145,7 +145,15 @@ class VictoriaLogsBackend(PayloadBackend):
                     content=body.encode("utf-8"),
                     headers={"Content-Type": "application/stream+json"},
                 )
-                return resp.status_code in (200, 204)
+                if resp.status_code not in (200, 204):
+                    logger.warning(
+                        "VictoriaLogs write failed for %s: HTTP %s, body_preview=%s",
+                        request_id,
+                        resp.status_code,
+                        resp.text[:500] if resp.text else "",
+                    )
+                    return False
+                return True
         except Exception as e:
             logger.warning("VictoriaLogs write failed for %s: %s", request_id, e)
             return False
