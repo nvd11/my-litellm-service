@@ -179,13 +179,34 @@ def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str
     """提取请求模型别名 (model_requested) 与实际命中上游模型 (model_used).
 
     用于清晰展示模型路由和梯队降级轨迹 (如请求 gemini-3.7-flash -> 降级为 gemini-3.7-backup).
+
+    关键修复：当 LiteLLM 执行降级时，kwargs["model"] 会被修改为降级后的模型。
+    原始请求的模型保存在 kwargs["litellm_params"]["metadata"]["original_model"] 中。
+    优先从 metadata 中获取原始模型，确保正确显示降级轨迹。
     """
-    model_requested = (
-        kwargs.get("model")
-        or kwargs.get("model_requested")
-        or kwargs.get("litellm_params", {}).get("model")
-        or "unknown"
-    )
+    # 1. 优先从 litellm_params.metadata 获取原始模型（降级前的模型）
+    litellm_params = kwargs.get("litellm_params")
+    if isinstance(litellm_params, dict):
+        lp_meta = litellm_params.get("metadata")
+        if isinstance(lp_meta, dict):
+            original_model = lp_meta.get("original_model") or lp_meta.get("requested_model")
+            if original_model:
+                model_requested = str(original_model)
+            else:
+                model_requested = None
+        else:
+            model_requested = None
+    else:
+        model_requested = None
+
+    # 2. 如果 metadata 中没有原始模型，fallback 到 kwargs["model"]
+    if not model_requested:
+        model_requested = (
+            kwargs.get("model")
+            or kwargs.get("model_requested")
+            or kwargs.get("litellm_params", {}).get("model")
+            or "unknown"
+        )
 
     model_used = "unknown"
     if hasattr(response_obj, "model") and response_obj.model:

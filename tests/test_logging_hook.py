@@ -263,7 +263,37 @@ def test_extract_model_names():
     assert req_f == "gemini-3.7-flash"
     assert used_f == "openai/gemini-3.7-backup"
 
-    # 3. 兜底情况
+    # 3. LiteLLM 降级场景：kwargs["model"] 被修改为降级后的模型
+    # 原始模型保存在 litellm_params.metadata.original_model 中
+    kwargs_litellm_fallback = {
+        "model": "gpt-5.6-luna-a6",  # LiteLLM 修改后的降级模型
+        "litellm_params": {
+            "model": "gpt-5.6-luna-a6",
+            "metadata": {
+                "original_model": "kimi-k3",  # 原始请求的模型
+            }
+        }
+    }
+    resp_litellm_fallback = {"model": "openai/gpt-5.6-luna"}
+    req_lf, used_lf = _extract_model_names(kwargs_litellm_fallback, resp_litellm_fallback)
+    assert req_lf == "kimi-k3"  # 应该显示原始模型，而不是降级后的模型
+    assert used_lf == "openai/gpt-5.6-luna"
+
+    # 4. LiteLLM 降级场景（使用 requested_model 字段）
+    kwargs_requested_model = {
+        "model": "gpt-5.6-luna-a6",
+        "litellm_params": {
+            "model": "gpt-5.6-luna-a6",
+            "metadata": {
+                "requested_model": "kimi-k3",
+            }
+        }
+    }
+    req_rm, used_rm = _extract_model_names(kwargs_requested_model, resp_litellm_fallback)
+    assert req_rm == "kimi-k3"
+    assert used_rm == "openai/gpt-5.6-luna"
+
+    # 5. 兜底情况
     req_d, used_d = _extract_model_names({}, None)
     assert req_d == "unknown"
     assert used_d == "unknown"
