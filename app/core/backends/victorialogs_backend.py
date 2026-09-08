@@ -156,6 +156,12 @@ class VictoriaLogsBackend(PayloadBackend):
                         resp.text[:500] if resp.text else "",
                     )
                     return False
+                logger.info(
+                    "VictoriaLogs write success for %s: shards=%d, total_size=%d bytes",
+                    request_id,
+                    total_shards,
+                    len(body.encode("utf-8")),
+                )
                 return True
         except Exception as e:
             logger.warning("VictoriaLogs write failed for %s: %s", request_id, e)
