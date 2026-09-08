@@ -37,7 +37,9 @@ class VictoriaLogsBackend(PayloadBackend):
     ) -> None:
         self.settings = settings
         self.endpoint = settings.victorialogs_url.rstrip("/")
-        self.timeout = httpx.Timeout(15.0, connect=5.0)
+        # 写入超时：大 payload (1.3MB+ 分片) 在网络抖动时需要更长时间
+        # 之前 15s 太短导致 VictoriaLogs 端报 "unexpected EOF" 客户端提前断开
+        self.timeout = httpx.Timeout(60.0, connect=10.0)
         self.chunk_size = chunk_size
         self.safe_single_entry_limit = safe_single_entry_limit
 
