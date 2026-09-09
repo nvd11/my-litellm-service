@@ -170,7 +170,7 @@ litellm_settings:
     host: os.environ/REDIS_HOST
     port: os.environ/REDIS_PORT
     password: os.environ/REDIS_PASSWORD
-    supported_call_types: [chat_completion]
+    supported_call_types: ["completion", "acompletion"]
     ttl: 3600
 
 general_settings:
