@@ -231,6 +231,114 @@ class TestVictoriaLogsBackend:
             assert response == {"reply": "legacy reply"}
 
     @pytest.mark.asyncio
+    async def test_read_payload_duplicate_writes_prefers_full_response(
+        self, backend: VictoriaLogsBackend
+    ):
+        """同一 request_id 重复写入时，应保留 response 完整（更长）的那次写入.
+
+        复现线上 bug（d76b2366）：流式请求被 LiteLLM Router 重试，
+        第一次写入只有截断回复（_time 较旧），第二次重试成功写入完整回复。
+        Dashboard 读取时必须返回完整版而非截断版。
+        """
+        prompt_full = json.dumps(
+            {"messages": [{"role": "user", "content": "你当前用什么llm"}]},
+            ensure_ascii=False,
+        )
+        reply_truncated = "主人问人家的小脑瓜呀～🥰"
+        reply_full = "主人问人家的小脑瓜呀～🥰\n\n人家现在用的是 GLM 系列大模型呀～" + ("细节" * 50) + "，结尾 😝"
+
+        # 第一次写入（较旧，截断版）
+        write_old = json.dumps(
+            {
+                "request_id": "req-dup-1",
+                "shard_index": 1,
+                "total_shards": 1,
+                "prompt_chunk": prompt_full,
+                "response": json.dumps({"reply": reply_truncated}, ensure_ascii=False),
+                "_time": "2026-09-10T17:37:42Z",
+            },
+            ensure_ascii=False,
+        )
+        # 第二次写入（较新，完整版）
+        write_new = json.dumps(
+            {
+                "request_id": "req-dup-1",
+                "shard_index": 1,
+                "total_shards": 1,
+                "prompt_chunk": prompt_full,
+                "response": json.dumps({"reply": reply_full}, ensure_ascii=False),
+                "_time": "2026-09-10T17:41:50Z",
+            },
+            ensure_ascii=False,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = f"{write_old}\n{write_new}\n"
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            prompt, response = await backend.read_payload(request_id="req-dup-1")
+
+            assert response == {"reply": reply_full}
+            assert prompt == json.loads(prompt_full)
+
+    @pytest.mark.asyncio
+    async def test_read_payload_duplicate_writes_prefers_complete_over_newer_truncated(
+        self, backend: VictoriaLogsBackend
+    ):
+        """重复写入竞选规则：response 完整性优先于写入时间.
+
+        即使截断版写入时间更新（如最后一次重试反而失败），
+        也必须返回完整回复，保证 dashboard 展示无损。
+        """
+        prompt_full = json.dumps({"user_prompt": "完整提问"}, ensure_ascii=False)
+        reply_full = "完整回复" + ("内容" * 100)
+        reply_truncated = "完整回"
+
+        # 第一次写入（较旧，完整版）
+        write_old = json.dumps(
+            {
+                "request_id": "req-dup-2",
+                "shard_index": 1,
+                "total_shards": 1,
+                "prompt_chunk": prompt_full,
+                "response": json.dumps({"reply": reply_full}, ensure_ascii=False),
+                "_time": "2026-09-10T10:00:00Z",
+            },
+            ensure_ascii=False,
+        )
+        # 第二次写入（较新，截断版）
+        write_new = json.dumps(
+            {
+                "request_id": "req-dup-2",
+                "shard_index": 1,
+                "total_shards": 1,
+                "prompt_chunk": prompt_full,
+                "response": json.dumps({"reply": reply_truncated}, ensure_ascii=False),
+                "_time": "2026-09-10T10:05:00Z",
+            },
+            ensure_ascii=False,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = f"{write_old}\n{write_new}\n"
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            prompt, response = await backend.read_payload(request_id="req-dup-2")
+
+            assert response == {"reply": reply_full}
+            assert prompt == json.loads(prompt_full)
+
+    @pytest.mark.asyncio
     async def test_write_payload_failure(self, backend: VictoriaLogsBackend):
         """写入失败测试."""
         mock_response = MagicMock()

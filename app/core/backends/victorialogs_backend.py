@@ -220,27 +220,43 @@ class VictoriaLogsBackend(PayloadBackend):
                     return {}, {}
 
                 # 1. 严格按 shard_index 去重（避免重试写入产生相同分片）
+                # 竞选规则（元组字典序逐项比较）：
+                #   1) response 非空且更长者优先 —— LiteLLM Router 重试场景下，
+                #      同一 request_id 可能被写入两次（第一次上游断流只拿到截断回复，
+                #      第二次重试成功拿到完整回复），必须优先保留完整版；
+                #   2) response 同长时 _time 更新者优先 —— 最新写入的记录最接近最终状态；
+                #   3) 兜底 prompt_chunk 更长者优先（兼容历史行为）。
                 unique_shards: dict[int, dict[str, Any]] = {}
                 for d in parsed_docs:
                     idx = int(d.get("shard_index", 1))
-                    if idx not in unique_shards or len(
-                        d.get("prompt_chunk") or d.get("prompt") or ""
-                    ) >= len(
-                        unique_shards[idx].get("prompt_chunk")
-                        or unique_shards[idx].get("prompt")
-                        or ""
-                    ):
+                    if idx not in unique_shards:
+                        unique_shards[idx] = d
+                        continue
+
+                    def _rank(doc: dict[str, Any]) -> tuple[int, str, int]:
+                        return (
+                            len(doc.get("response") or ""),
+                            str(doc.get("_time") or ""),
+                            len(doc.get("prompt_chunk") or doc.get("prompt") or ""),
+                        )
+
+                    if _rank(d) > _rank(unique_shards[idx]):
                         unique_shards[idx] = d
 
                 # 2. 动态排序分片 (1..N)
                 sorted_shards = [unique_shards[k] for k in sorted(unique_shards.keys())]
 
-                # 3. 提取 response (优先从第1片或带response字段的记录提取)
+                # 3. 提取 response：优先选取 _time 最新的非空 response。
+                # 双保险：即使 shard 去重后某分片 response 为空，也绝不用旧的截断版
+                # 覆盖重试成功后写入的完整版。
                 raw_response_str = ""
+                latest_ts = ""
                 for d in sorted_shards:
-                    if d.get("response"):
-                        raw_response_str = d["response"]
-                        break
+                    resp = d.get("response")
+                    ts = str(d.get("_time") or "")
+                    if resp and (not raw_response_str or ts >= latest_ts):
+                        raw_response_str = resp
+                        latest_ts = ts
 
                 # 4. 拼接 prompt 分片 (支持新格式 prompt_chunk 与兼容旧格式 prompt)
                 prompt_parts: list[str] = []
