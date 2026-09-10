@@ -253,8 +253,9 @@ async def test_filter_options_endpoint(mock_test_settings: Settings) -> None:
     app.dependency_overrides[get_settings] = lambda: mock_test_settings
 
     mock_conn = AsyncMock()
+    # 模型查询返回 (model_used, cnt) 聚合行（SQL 层已完成噪音过滤）
     mock_conn.execute.side_effect = [
-        MagicMock(fetchall=MagicMock(return_value=[("glm-5.3",), ("kimi-k3",), ("", None)])),
+        MagicMock(fetchall=MagicMock(return_value=[("glm-5.3", 107), ("kimi-k3", 2581)])),
         MagicMock(fetchall=MagicMock(return_value=[("cindy",), ("moon",)])),
     ]
     mock_engine = MagicMock()

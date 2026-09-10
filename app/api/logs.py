@@ -67,14 +67,24 @@ async def list_log_filter_options(
 
     动态获取筛选选项，避免前端硬编码导致新模型（如 glm-5.3）或新 Key 别名
     不出现在筛选器中。
+
+    模型列表只保留真实业务流量中出现过的模型，过滤规则：
+    1. 排除系统健康检查 (litellm-internal-health-check) 产生的流量；
+    2. 排除 provider 前缀形式（含 "/"）的原始模型串，如 openai/gpt-5.6-luna；
+    3. 排除 unknown（请求失败未解析出模型的占位值）；
+    4. 至少出现 2 次，过滤一次性测试流量（test / this-model-does-not-exist-404 等）。
     """
     engine = get_async_engine(settings)
 
     models_stmt = (
-        select(llm_request_logs.c.model_used)
-        .distinct()
+        select(llm_request_logs.c.model_used, func.count().label("cnt"))
+        .where(llm_request_logs.c.api_key_alias != "litellm-internal-health-check")
+        .where(llm_request_logs.c.model_used.notlike("%/%"))
         .where(llm_request_logs.c.model_used.isnot(None))
         .where(llm_request_logs.c.model_used != "")
+        .where(llm_request_logs.c.model_used != "unknown")
+        .group_by(llm_request_logs.c.model_used)
+        .having(func.count() >= 2)
         .order_by(llm_request_logs.c.model_used)
     )
     aliases_stmt = (
