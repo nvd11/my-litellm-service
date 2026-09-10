@@ -52,6 +52,48 @@ class PaginatedLogsResponse(BaseModel):
     total_pages: int
 
 
+class FilterOptionsResponse(BaseModel):
+    """Dynamic filter options for the dashboard dropdowns."""
+
+    models: list[str]
+    key_aliases: list[str]
+
+
+@router.get("/logs/filter-options", response_model=FilterOptionsResponse)
+async def list_log_filter_options(
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    """Return distinct model_used / api_key_alias values for dashboard filter dropdowns.
+
+    动态获取筛选选项，避免前端硬编码导致新模型（如 glm-5.3）或新 Key 别名
+    不出现在筛选器中。
+    """
+    engine = get_async_engine(settings)
+
+    models_stmt = (
+        select(llm_request_logs.c.model_used)
+        .distinct()
+        .where(llm_request_logs.c.model_used.isnot(None))
+        .where(llm_request_logs.c.model_used != "")
+        .order_by(llm_request_logs.c.model_used)
+    )
+    aliases_stmt = (
+        select(llm_request_logs.c.api_key_alias)
+        .distinct()
+        .where(llm_request_logs.c.api_key_alias.isnot(None))
+        .where(llm_request_logs.c.api_key_alias != "")
+        .order_by(llm_request_logs.c.api_key_alias)
+    )
+
+    async with engine.connect() as conn:
+        models = [str(row[0]) for row in (await conn.execute(models_stmt)).fetchall() if row[0]]
+        aliases = [
+            str(row[0]) for row in (await conn.execute(aliases_stmt)).fetchall() if row[0]
+        ]
+
+    return FilterOptionsResponse(models=models, key_aliases=aliases)
+
+
 @router.get("/logs", response_model=PaginatedLogsResponse)
 async def list_audit_logs(
     page: int = Query(1, ge=1, description="Page number starting from 1"),
