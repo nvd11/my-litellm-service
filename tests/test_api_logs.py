@@ -245,3 +245,28 @@ async def test_get_request_payload_success(mock_test_settings: Settings) -> None
         assert data["response"]["reply"] == "hello there"
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_filter_options_endpoint(mock_test_settings: Settings) -> None:
+    """Filter options endpoint returns distinct models and key aliases for dropdowns."""
+    app.dependency_overrides[get_settings] = lambda: mock_test_settings
+
+    mock_conn = AsyncMock()
+    mock_conn.execute.side_effect = [
+        MagicMock(fetchall=MagicMock(return_value=[("glm-5.3",), ("kimi-k3",), ("", None)])),
+        MagicMock(fetchall=MagicMock(return_value=[("cindy",), ("moon",)])),
+    ]
+    mock_engine = MagicMock()
+    mock_engine.connect.return_value.__aenter__.return_value = mock_conn
+
+    with patch("app.api.logs.get_async_engine", return_value=mock_engine):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/api/v1/logs/filter-options")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["models"] == ["glm-5.3", "kimi-k3"]
+            assert data["key_aliases"] == ["cindy", "moon"]
+
+    app.dependency_overrides.clear()

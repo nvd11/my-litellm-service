@@ -51,6 +51,39 @@ export const LogsTable: React.FC<LogsTableProps> = ({
   onSelectLog,
   selectedLogId,
 }) => {
+  // 动态获取筛选选项（后端 DISTINCT model_used / api_key_alias），避免硬编码遗漏新增项
+  const [modelOptions, setModelOptions] = React.useState<string[]>([]);
+  const [keyAliasOptions, setKeyAliasOptions] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/logs/filter-options")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data?.models)) setModelOptions(data.models);
+        if (Array.isArray(data?.key_aliases)) setKeyAliasOptions(data.key_aliases);
+      })
+      .catch(() => {
+        /* 拉取失败时保持空列表，仅显示"全部"选项，不影响主流程 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 兜底：确保当前选中值始终出现在下拉中（例如尚未产生日志的新模型/新 Key）
+  const models = React.useMemo(() => {
+    const set = new Set(modelOptions);
+    if (selectedModel) set.add(selectedModel);
+    return Array.from(set).sort();
+  }, [modelOptions, selectedModel]);
+
+  const keyAliases = React.useMemo(() => {
+    const set = new Set(keyAliasOptions);
+    if (selectedKeyAlias) set.add(selectedKeyAlias);
+    return Array.from(set).sort();
+  }, [keyAliasOptions, selectedKeyAlias]);
+
   const getStatusBadge = (statusCode: number, errorMsg?: string | null) => {
     if (statusCode === 200) {
       return (
@@ -130,10 +163,11 @@ export const LogsTable: React.FC<LogsTableProps> = ({
             className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部 Key 别名</option>
-            <option value="cindy">cindy</option>
-            <option value="hebe">hebe</option>
-            <option value="rin">rin</option>
-            <option value="default_user_id">default_user_id (Master)</option>
+            {keyAliases.map((alias) => (
+              <option key={alias} value={alias}>
+                {alias === "default_user_id" ? "default_user_id (Master)" : alias}
+              </option>
+            ))}
           </select>
 
           {/* Model Filter */}
@@ -143,11 +177,11 @@ export const LogsTable: React.FC<LogsTableProps> = ({
             className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-blue-500 font-medium"
           >
             <option value="">全部模型</option>
-            <option value="gemini-3.8-flash">gemini-3.8-flash</option>
-            <option value="gemini-3.7-flash">gemini-3.7-flash</option>
-            <option value="gemini-3.8-backup">gemini-3.8-backup</option>
-            <option value="gemini-3.7-backup">gemini-3.7-backup</option>
-            <option value="kimi-k3">kimi-k3</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
           </select>
 
           {/* Status Code Filter */}
