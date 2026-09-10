@@ -99,6 +99,24 @@ model_list:
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
+  # === 🧠 GLM-5.3 深度思考推理大模型 (A6 API 智谱渠道 - 实测: $0.036/1M Input, $0.113/1M Output) ===
+  - model_name: glm-5.3
+    litellm_params:
+      model: openai/glm-5.3
+      api_base: https://api.a6api.com/v1
+      api_key: os.environ/A6_API_KEY
+      input_cost_per_token: 0.000000036
+      output_cost_per_token: 0.000000113143
+      rpm: 60
+      metadata:
+        provider: "a6api.com"
+        provider_key_alias: "A6_API_KEY"
+    model_info:
+      input_cost_per_token: 0.000000036
+      output_cost_per_token: 0.000000113143
+      provider: "a6api.com"
+      provider_key_alias: "A6_API_KEY"
+
   # === 🌕 GPT-5.6 Luna 轻量编程推理模型 (A6 API - 2026-09-05 实测: $0.0096/1M, 约 ¥0.07/1M) ===
   - model_name: gpt-5.6-luna-a6
     litellm_params:
@@ -153,7 +171,8 @@ router_settings:
   fallbacks:
     - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.8-backup"]
     - gemini-3.7-flash: ["gemini-3.8-backup"]
-    - kimi-k3: ["gpt-5.6-luna-a6"]
+    - kimi-k3: ["glm-5.3", "gpt-5.6-luna-a6"]
+    - glm-5.3: ["kimi-k3", "gpt-5.6-luna-a6"]
     - gpt-5.6-luna-a6: ["gpt-5.6-luna-yuanheng"]
     - gpt-5.6-luna-yuanheng: ["gpt-5.6-luna-a6"]
 
