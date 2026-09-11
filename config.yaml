@@ -99,21 +99,21 @@ model_list:
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
-  # === 🧠 GLM-5.3 深度思考推理大模型 (A6 API 智谱渠道 - 实测: $0.036/1M Input, $0.113/1M Output) ===
+  # === 🧠 GLM-5.3 深度思考推理大模型 (A6 API BBGT-VIP 渠道 - 实测: $0.0102/1M Input, $0.032057/1M Output, 约 ¥0.074/¥0.232) ===
   - model_name: glm-5.3
     litellm_params:
       model: openai/glm-5.3
       api_base: https://api.a6api.com/v1
       api_key: os.environ/A6_API_KEY
-      input_cost_per_token: 0.000000036
-      output_cost_per_token: 0.000000113143
+      input_cost_per_token: 0.0000000102
+      output_cost_per_token: 0.000000032057
       rpm: 60
       metadata:
         provider: "a6api.com"
         provider_key_alias: "A6_API_KEY"
     model_info:
-      input_cost_per_token: 0.000000036
-      output_cost_per_token: 0.000000113143
+      input_cost_per_token: 0.0000000102
+      output_cost_per_token: 0.000000032057
       provider: "a6api.com"
       provider_key_alias: "A6_API_KEY"
 
