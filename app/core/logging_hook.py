@@ -224,8 +224,8 @@ def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str
         model_used = str(model_requested)
 
     # 规范化：如果上游返回的 model 与请求的别名一致，或者属于同一个 model_group，消除虚假的"降级自"标签
-    if model_requested == "hermes-agent" and model_used == "rin":
-        model_requested = "rin"
+    if model_requested == "hermes-agent" and model_used in ("rin", "yui"):
+        model_requested = model_used
 
     return str(model_requested)[:64], str(model_used)[:64]
 
