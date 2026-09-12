@@ -173,6 +173,26 @@ model_list:
       provider: "hermes-rin"
       provider_key_alias: "RIN_AGENT"
 
+  # === 🎀 大和抚子系精灵结衣 Yui (Hermes Agent 本地直连) ===
+  - model_name: yui
+    litellm_params:
+      model: openai/hermes-agent
+      api_base: http://100.115.214.26:8644/v1
+      api_key: sk-yui-40b9abf5a3612e48aa25111afbc4f813
+      timeout: 600
+      stream_timeout: 600
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      rpm: 120
+      metadata:
+        provider: "hermes-yui"
+        provider_key_alias: "YUI_AGENT"
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      provider: "hermes-yui"
+      provider_key_alias: "YUI_AGENT"
+
 router_settings:
   routing_strategy: "least-busy" # 负载均衡：优先选择当前空闲/负载最小的 Key 派发请求
 
