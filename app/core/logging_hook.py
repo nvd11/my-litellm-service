@@ -201,8 +201,15 @@ def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str
 
     # 2. 如果 metadata 中没有原始模型，fallback 到 kwargs["model"]
     if not model_requested:
+        # 针对部分代理/网关场景（如调用 openai/hermes-agent 时底层返回 model="rin"），
+        # 如果 kwargs 中带有 model_group，它代表客户端在 LiteLLM 层面真正请求的公共模型别名
+        model_group = (
+            kwargs.get("model_group")
+            or (litellm_params.get("metadata", {}).get("model_group") if isinstance(litellm_params, dict) else None)
+        )
         model_requested = (
-            kwargs.get("model")
+            model_group
+            or kwargs.get("model")
             or kwargs.get("model_requested")
             or kwargs.get("litellm_params", {}).get("model")
             or "unknown"
@@ -215,6 +222,10 @@ def _extract_model_names(kwargs: dict[str, Any], response_obj: Any) -> tuple[str
         model_used = str(response_obj["model"])
     else:
         model_used = str(model_requested)
+
+    # 规范化：如果上游返回的 model 与请求的别名一致，或者属于同一个 model_group，消除虚假的"降级自"标签
+    if model_requested == "hermes-agent" and model_used == "rin":
+        model_requested = "rin"
 
     return str(model_requested)[:64], str(model_used)[:64]
 
