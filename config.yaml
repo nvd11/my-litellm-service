@@ -153,6 +153,24 @@ model_list:
       provider: "cn.meta-api.vip"
       provider_key_alias: "META_API_KEY"
 
+  # === ❄️ 傲娇大小姐凛 Rin (Hermes Agent 本地直连) ===
+  - model_name: rin
+    litellm_params:
+      model: openai/hermes-agent
+      api_base: http://100.115.214.26:8642/v1
+      api_key: sk-rin-8f1d3c92e104b47a952a123456789abc
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      rpm: 120
+      metadata:
+        provider: "hermes-rin"
+        provider_key_alias: "RIN_AGENT"
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      provider: "hermes-rin"
+      provider_key_alias: "RIN_AGENT"
+
 router_settings:
   routing_strategy: "least-busy" # 负载均衡：优先选择当前空闲/负载最小的 Key 派发请求
 
