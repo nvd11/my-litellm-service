@@ -158,7 +158,7 @@ model_list:
     litellm_params:
       model: openai/hermes-agent
       api_base: http://100.115.214.26:8642/v1
-      api_key: sk-rin-8f1d3c92e104b47a952a123456789abc
+      api_key: os.environ/RIN_API_KEY
       timeout: 600
       stream_timeout: 600
       input_cost_per_token: 0.0
@@ -178,7 +178,7 @@ model_list:
     litellm_params:
       model: openai/hermes-agent
       api_base: http://100.115.214.26:8644/v1
-      api_key: sk-yui-40b9abf5a3612e48aa25111afbc4f813
+      api_key: os.environ/YUI_API_KEY
       timeout: 600
       stream_timeout: 600
       input_cost_per_token: 0.0
