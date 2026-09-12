@@ -235,3 +235,16 @@ litellm_settings:
 general_settings:
   # 🎯 确保 Proxy 网关层对所有流式请求开启 Token 计数
   stream_usage: true
+
+  # 🎯 Hermes 自主 Agent 无损直通通道 (保留原生 tool.progress 事件与流式状态)
+  pass_through_endpoints:
+    - path: "/hermes/yui"
+      target: "http://100.115.214.26:8644"
+      include_subpath: true
+      headers:
+        Authorization: "Bearer os.environ/API_SERVER_KEY_YUI"
+    - path: "/hermes/rin"
+      target: "http://100.115.214.26:8642"
+      include_subpath: true
+      headers:
+        Authorization: "Bearer os.environ/API_SERVER_KEY_RIN"
