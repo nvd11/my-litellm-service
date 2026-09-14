@@ -634,6 +634,30 @@ class DBLoggingLogger(CustomLogger):
         except Exception as err:
             logger.warning("Failed to async log failure event to MySQL: %s", err)
 
+    async def async_pre_call_deployment_hook(
+        self, kwargs: dict[str, Any], call_type: Any | None
+    ) -> dict[str, Any] | None:
+        """在请求派发给底层模型前进行报文净化 (Pre-call deployment hook).
+
+        修复 Google Gemini 官方特有缺陷：
+        当工具执行结果 (role='tool') 中包含 JSON Schema 的引用关键字 `"$ref"` 时，
+        Google Gemini 后端反序列化器会将其误判为 Function Calling 内部的 Schema 引用，
+        进而抛出 400 异常：
+        `The referenced name ... in function_response.response does not match to a display_name in the function_response.parts.`
+        在此处将 `"$ref"` 安全替换为 `"_ref"`，彻底免疫 Google Gemini 后端的反序列化崩溃。
+        """
+        try:
+            messages = kwargs.get("messages")
+            if isinstance(messages, list):
+                for msg in messages:
+                    if isinstance(msg, dict) and msg.get("role") in ("tool", "function"):
+                        content = msg.get("content")
+                        if isinstance(content, str) and ('"$ref"' in content or '"\\$ref"' in content):
+                            msg["content"] = content.replace('"\\$ref"', '"_ref"').replace('"$ref"', '"_ref"')
+        except Exception as e:
+            logger.warning("Error in async_pre_call_deployment_hook sanitizing tool messages: %s", e)
+        return kwargs
+
 
 # ==============================================================================
 # LiteLLM 默认导入实例 (LiteLLM Callback Entrypoint)
