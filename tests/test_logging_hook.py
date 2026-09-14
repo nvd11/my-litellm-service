@@ -557,3 +557,32 @@ async def test_async_log_events_database_failure_resilience(monkeypatch):
 
     # 2. 失败事件遇 DB 异常不抛出
     await logger.async_log_failure_event(kwargs, Exception("test error"), 1.0, 2.0)
+
+
+@pytest.mark.asyncio
+async def test_async_pre_call_deployment_hook_sanitization():
+    """验证派发给底层模型前自动净化工具响应中的 $ref 避免 Gemini 400 崩溃."""
+    logger = DBLoggingLogger()
+
+    kwargs = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": '{"schema": {"$ref": "#/components/schemas/HTTPValidationError"}}',
+            },
+            {
+                "role": "function",
+                "content": '{"error": {"$ref": "#/test"}}',
+            },
+        ]
+    }
+
+    res = await logger.async_pre_call_deployment_hook(kwargs, None)
+    assert res is not None
+    msgs = res["messages"]
+    assert '"_ref"' in msgs[1]["content"]
+    assert '"$ref"' not in msgs[1]["content"]
+    assert '"_ref"' in msgs[2]["content"]
+    assert '"$ref"' not in msgs[2]["content"]
