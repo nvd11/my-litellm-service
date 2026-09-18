@@ -4,6 +4,7 @@
 并在读取时动态检索全部分片按序号升序还原完整 Payload。
 """
 
+import gzip
 import json
 import logging
 from typing import Any
@@ -37,9 +38,9 @@ class VictoriaLogsBackend(PayloadBackend):
     ) -> None:
         self.settings = settings
         self.endpoint = settings.victorialogs_url.rstrip("/")
-        # 写入超时：大 payload (1.3MB+ 分片) 在网络抖动时需要更长时间
-        # 之前 15s 太短导致 VictoriaLogs 端报 "unexpected EOF" 客户端提前断开
-        self.timeout = httpx.Timeout(60.0, connect=10.0)
+        # 写入超时：大 payload (1.3MB+ 分片) 在跨国长肥网络抖动时需要更充裕时间
+        # 配合 gzip 压缩，可彻底避开客户端提前超时导致的服务端 EOF 异常
+        self.timeout = httpx.Timeout(120.0, connect=10.0)
         self.chunk_size = chunk_size
         self.safe_single_entry_limit = safe_single_entry_limit
 
@@ -140,15 +141,20 @@ class VictoriaLogsBackend(PayloadBackend):
             }
             log_entries.append(entry)
 
-        # 批量 JSONLine 序列化，一次网络请求批量写入
-        body = "\n".join(json.dumps(e, ensure_ascii=False) for e in log_entries) + "\n"
+        # 批量 JSONLine 序列化，配合 HTTP Gzip 压缩传输，大幅减少跨国长肥网络带宽开销与耗时
+        raw_body = "\n".join(json.dumps(e, ensure_ascii=False) for e in log_entries) + "\n"
+        raw_bytes = raw_body.encode("utf-8")
+        compressed_body = gzip.compress(raw_bytes)
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
                     f"{self.endpoint}/insert/jsonline",
-                    content=body.encode("utf-8"),
-                    headers={"Content-Type": "application/stream+json"},
+                    content=compressed_body,
+                    headers={
+                        "Content-Type": "application/stream+json",
+                        "Content-Encoding": "gzip",
+                    },
                 )
                 if resp.status_code not in (200, 204):
                     logger.warning(
@@ -159,10 +165,11 @@ class VictoriaLogsBackend(PayloadBackend):
                     )
                     return False
                 logger.info(
-                    "VictoriaLogs write success for %s: shards=%d, total_size=%d bytes",
+                    "VictoriaLogs write success for %s: shards=%d, raw_bytes=%d, compressed_bytes=%d",
                     request_id,
                     total_shards,
-                    len(body.encode("utf-8")),
+                    len(raw_bytes),
+                    len(compressed_body),
                 )
                 return True
         except Exception as e:
@@ -267,8 +274,36 @@ class VictoriaLogsBackend(PayloadBackend):
 
                 full_prompt_str = "".join(prompt_parts)
 
-                prompt_dict = json.loads(full_prompt_str) if full_prompt_str else {}
-                response_dict = json.loads(raw_response_str) if raw_response_str else {}
+                prompt_dict: dict[str, Any] = {}
+                if full_prompt_str:
+                    try:
+                        prompt_dict = json.loads(full_prompt_str)
+                    except Exception as parse_err:
+                        logger.warning(
+                            "Failed to parse prompt JSON for %s (len=%d): %s",
+                            request_id,
+                            len(full_prompt_str),
+                            parse_err,
+                        )
+                        # 容错降级：如果历史分片缺失导致 JSON 不完整，提取关键字段避免页面白屏
+                        prompt_dict = {
+                            "model": sorted_shards[0].get("model") if sorted_shards else "unknown",
+                            "user_prompt": full_prompt_str[:4000] + " ...[报文分片解析截断]",
+                            "raw_text": full_prompt_str[:10000],
+                            "parse_warning": f"JSON parse error: {parse_err}",
+                        }
+
+                response_dict: dict[str, Any] = {}
+                if raw_response_str:
+                    try:
+                        response_dict = json.loads(raw_response_str)
+                    except Exception as parse_err:
+                        logger.warning(
+                            "Failed to parse response JSON for %s: %s",
+                            request_id,
+                            parse_err,
+                        )
+                        response_dict = {"reply": raw_response_str[:5000]}
 
                 return prompt_dict, response_dict
         except Exception as e:
