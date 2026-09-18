@@ -182,3 +182,30 @@ async def test_async_upload_payload_exception_isolated(test_settings: Settings) 
             response_obj={},
             settings=test_settings,
         )
+
+
+@pytest.mark.asyncio
+async def test_async_upload_payload_redis_write_through(test_settings: Settings) -> None:
+    """Ensure newly generated requests immediately write-through to Redis with 7 days TTL."""
+    import json
+    mock_redis = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.write_payload = AsyncMock(return_value=True)
+
+    with patch("app.core.payload_uploader.get_redis_client", return_value=mock_redis):
+        await async_upload_payload(
+            request_id="req-new-7days-ttl",
+            kwargs={"model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "hello"}]},
+            response_obj={"choices": [{"message": {"content": "world"}}]},
+            settings=test_settings,
+            backend=mock_backend,
+        )
+
+    # 验证 redis.set 在落盘前已被即时调用，且 TTL 为 7 天 (604800 秒)
+    mock_redis.set.assert_called_once()
+    args, kwargs = mock_redis.set.call_args
+    assert args[0] == "litellm:payload:req-new-7days-ttl"
+    data = json.loads(args[1])
+    assert data["prompt"]["user_prompt"] == "hello"
+    assert data["response"]["reply"] == "world"
+    assert kwargs["ex"] == 86400 * 7

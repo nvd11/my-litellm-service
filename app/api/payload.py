@@ -107,14 +107,14 @@ async def get_request_payload(
             except Exception:
                 response_data = {"reply": response_data}
 
-        # 方案 1: 查得结果后，回填至 Redis L2 缓存 (TTL: 3天)
+        # 方案 1: 查得结果后，回填至 Redis L2 缓存 (TTL: 7天)
         if prompt_data or response_data:
             try:
                 redis = get_redis_client(settings)
                 await redis.set(
                     cache_key,
                     json.dumps({"prompt": prompt_data, "response": response_data}, ensure_ascii=False),
-                    ex=86400 * 3,
+                    ex=86400 * 7,
                 )
                 logger.debug("Populated Redis payload cache for %s", request_id)
             except Exception as cache_err:
