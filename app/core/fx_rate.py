@@ -22,6 +22,7 @@ import httpx
 from redis import asyncio as redis_asyncio
 
 from app.core.config import Settings, get_settings
+from app.core.redis_client import get_redis_client, reset_redis_client
 
 # 日志记录器
 logger = logging.getLogger(__name__)
@@ -50,41 +51,16 @@ _l1_rate: float | None = None
 # 上次成功更新 L1 缓存的单调时钟时间戳 (monotonic timestamp)
 _l1_timestamp: float = 0.0
 
-# 共享单例 Redis 异步客户端实例
-_redis_client: redis_asyncio.Redis | None = None
-
-
-def get_redis_client(settings: Settings) -> redis_asyncio.Redis:
-    """获取或懒加载单例 Redis 异步客户端.
-
-    参数:
-        settings: 系统全局配置对象 (包含 Redis 主机、端口、密码与超时参数)
-
-    返回:
-        redis_asyncio.Redis: 经过配置的 Redis 异步客户端单例
-    """
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = redis_asyncio.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            password=settings.redis_password.get_secret_value(),
-            socket_connect_timeout=settings.connect_timeout_seconds,
-            socket_timeout=settings.connect_timeout_seconds,
-            decode_responses=True,  # 自动将 Redis 返回的 bytes 解码为 UTF-8 字符串
-        )
-    return _redis_client
-
 
 def reset_fx_cache() -> None:
     """重置 L1 内存缓存并清空 Redis 客户端实例.
 
     主要用于单元测试中的状态隔离，确保每个用例都在纯净的环境下执行。
     """
-    global _l1_rate, _l1_timestamp, _redis_client
+    global _l1_rate, _l1_timestamp
     _l1_rate = None
     _l1_timestamp = 0.0
-    _redis_client = None
+    reset_redis_client()
 
 
 async def _fetch_from_api() -> float | None:

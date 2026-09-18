@@ -193,10 +193,11 @@ class VictoriaLogsBackend(PayloadBackend):
         Returns:
             tuple: (prompt_data, response_data)，不存在时返回空 dict
         """
-        # 使用精确匹配与前缀过滤
+        # 使用精确匹配与前缀过滤，配合字段投影剪枝 (Fields Pruning) 剔除冗余系统标签与元数据
         query = f'env: "prod" AND type: "payload" AND request_id: exact("{request_id}")'
         if date:
             query += f" AND _time: {date}"
+        query += " | fields shard_index, total_shards, prompt_chunk, prompt, response, model, _time"
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

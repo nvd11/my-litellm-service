@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
 from app.core.payload_backend import PayloadBackend
+from app.core.redis_client import get_redis_client
 from app.db import get_async_engine, llm_request_logs
 
 logger = logging.getLogger(__name__)
@@ -44,45 +45,80 @@ async def get_request_payload(
     When multiple shards exist in VictoriaLogs for an oversized payload, the backend
     dynamically reassembles them in ascending shard_index order back into the full document.
     """
-    date_str: str | None = None
+    cache_key = f"litellm:payload:{request_id}"
+    cached_prompt: dict[str, Any] | None = None
+    cached_response: dict[str, Any] | None = None
 
-    # 1. 优先从 MySQL 查询该 request_id 实际落库时的 UTC 日期分区
+    # 方案 1: 优先从 Redis L2 缓存中检索不可变 Payload (<1ms 极速直出)
     try:
-        engine = get_async_engine(settings)
-        stmt = (
-            select(llm_request_logs.c.created_at)
-            .where(llm_request_logs.c.request_id == request_id)
-            .limit(1)
-        )
-        async with engine.connect() as conn:
-            result = await conn.execute(stmt)
-            created_dt = result.scalar_one_or_none()
-            if created_dt and isinstance(created_dt, datetime):
-                date_str = created_dt.strftime("%Y-%m-%d")
-    except Exception as db_err:
-        logger.debug("Could not query created_at from MySQL for payload %s: %s", request_id, db_err)
+        redis = get_redis_client(settings)
+        cached_raw = await redis.get(cache_key)
+        if cached_raw:
+            cached_obj = json.loads(cached_raw)
+            if isinstance(cached_obj, dict):
+                cached_prompt = cached_obj.get("prompt")
+                cached_response = cached_obj.get("response")
+                logger.debug("Redis payload cache hit for %s", request_id)
+    except Exception as redis_err:
+        logger.debug("Redis payload cache read failed for %s: %s", request_id, redis_err)
 
-    # 2. 兜底回退至传入日期或当前日期
-    if not date_str:
-        if target_date:
-            date_str = target_date.strftime("%Y-%m-%d")
-        else:
-            date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+    if cached_prompt is not None and cached_response is not None:
+        prompt_data = cached_prompt
+        response_data = cached_response
+        date_str = target_date.strftime("%Y-%m-%d") if target_date else datetime.now(UTC).strftime("%Y-%m-%d")
+    else:
+        date_str = None
 
-    # 3. 通过抽象基类读取 payload (VictoriaLogs 内部自动完成多分片重组还原)
-    prompt_data, response_data = await backend.read_payload(request_id, date_str)
-
-    # 容错：如果后端返回的是字符串则安全解析为字典
-    if isinstance(prompt_data, str):
+        # 1. 优先从 MySQL 查询该 request_id 实际落库时的 UTC 日期分区
         try:
-            prompt_data = json.loads(prompt_data)
-        except Exception:
-            prompt_data = {"user_prompt": prompt_data}
-    if isinstance(response_data, str):
-        try:
-            response_data = json.loads(response_data)
-        except Exception:
-            response_data = {"reply": response_data}
+            engine = get_async_engine(settings)
+            stmt = (
+                select(llm_request_logs.c.created_at)
+                .where(llm_request_logs.c.request_id == request_id)
+                .limit(1)
+            )
+            async with engine.connect() as conn:
+                result = await conn.execute(stmt)
+                created_dt = result.scalar_one_or_none()
+                if created_dt and isinstance(created_dt, datetime):
+                    date_str = created_dt.strftime("%Y-%m-%d")
+        except Exception as db_err:
+            logger.debug("Could not query created_at from MySQL for payload %s: %s", request_id, db_err)
+
+        # 2. 兜底回退至传入日期或当前日期
+        if not date_str:
+            if target_date:
+                date_str = target_date.strftime("%Y-%m-%d")
+            else:
+                date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+
+        # 3. 通过抽象基类读取 payload (VictoriaLogs 内部自动完成多分片重组还原)
+        prompt_data, response_data = await backend.read_payload(request_id, date_str)
+
+        # 容错：如果后端返回的是字符串则安全解析为字典
+        if isinstance(prompt_data, str):
+            try:
+                prompt_data = json.loads(prompt_data)
+            except Exception:
+                prompt_data = {"user_prompt": prompt_data}
+        if isinstance(response_data, str):
+            try:
+                response_data = json.loads(response_data)
+            except Exception:
+                response_data = {"reply": response_data}
+
+        # 方案 1: 查得结果后，回填至 Redis L2 缓存 (TTL: 3天)
+        if prompt_data or response_data:
+            try:
+                redis = get_redis_client(settings)
+                await redis.set(
+                    cache_key,
+                    json.dumps({"prompt": prompt_data, "response": response_data}, ensure_ascii=False),
+                    ex=86400 * 3,
+                )
+                logger.debug("Populated Redis payload cache for %s", request_id)
+            except Exception as cache_err:
+                logger.debug("Could not populate Redis payload cache for %s: %s", request_id, cache_err)
 
     # 4. 构建公开访问 URL（仅 MinIO 后端适用）
     base_url = settings.payload_public_base_url.rstrip("/")
