@@ -220,10 +220,22 @@ async def async_upload_payload(
             "spend": 0.0,
         }
 
-        # 获取后端实例
-        payload_backend = backend or get_payload_backend(resolved_settings)
+        # 方案 1: 优先瞬间写穿 (Pre-populate) 到本地 Redis L2 缓存 (TTL: 3天)
+        # 耗时仅 <1ms！确保前端看板在模型刚结束哪怕 1 毫秒后点击，也能 100% 从 Redis 命中，彻底消灭远端网络写入未完成导致的竞态！
+        try:
+            redis = get_redis_client(resolved_settings)
+            cache_key = f"litellm:payload:{request_id}"
+            cached_val = json.dumps(
+                {"prompt": prompt_dict, "response": response_dict},
+                ensure_ascii=False,
+            )
+            await redis.set(cache_key, cached_val, ex=86400 * 3)
+            logger.debug("Successfully pre-populated Redis L2 payload cache for %s", request_id)
+        except Exception as cache_err:
+            logger.debug("Could not pre-populate Redis L2 payload cache for %s: %s", request_id, cache_err)
 
-        # 写入 payload
+        # 获取后端实例并推往远端冷存储归档 (如 Starfive VictoriaLogs)
+        payload_backend = backend or get_payload_backend(resolved_settings)
         success = await payload_backend.write_payload(
             request_id=request_id,
             prompt=prompt_dict,
@@ -233,18 +245,6 @@ async def async_upload_payload(
 
         if success:
             logger.debug("Successfully uploaded payload for request %s", request_id)
-            # 方案 1: 写穿 (Write-through) 到 Redis L2 缓存 (TTL: 3天)，加速后续看板点阅
-            try:
-                redis = get_redis_client(resolved_settings)
-                cache_key = f"litellm:payload:{request_id}"
-                cached_val = json.dumps(
-                    {"prompt": prompt_dict, "response": response_dict},
-                    ensure_ascii=False,
-                )
-                await redis.set(cache_key, cached_val, ex=86400 * 3)
-                logger.debug("Successfully populated Redis L2 payload cache for %s", request_id)
-            except Exception as cache_err:
-                logger.debug("Could not populate Redis L2 payload cache for %s: %s", request_id, cache_err)
         else:
             logger.warning("Failed to upload payload for request %s", request_id)
     except Exception as exc:
