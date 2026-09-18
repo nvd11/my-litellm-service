@@ -1,5 +1,6 @@
 """VictoriaLogsBackend 单元与集成测试（涵盖超限切块分片与动态合并还原）."""
 
+import gzip
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -73,8 +74,9 @@ class TestVictoriaLogsBackend:
             call_args = mock_client.post.call_args
             assert call_args[0][0] == "http://localhost:9428/insert/jsonline"
             assert call_args[1]["headers"]["Content-Type"] == "application/stream+json"
+            assert call_args[1]["headers"]["Content-Encoding"] == "gzip"
 
-            body = call_args[1]["content"].decode("utf-8").strip()
+            body = gzip.decompress(call_args[1]["content"]).decode("utf-8").strip()
             lines = body.split("\n")
             assert len(lines) == 1
 
@@ -123,7 +125,8 @@ class TestVictoriaLogsBackend:
             mock_client.post.assert_called_once()
 
             # 验证批量请求体包含了多个分片
-            content_bytes = mock_client.post.call_args[1]["content"]
+            assert mock_client.post.call_args[1]["headers"]["Content-Encoding"] == "gzip"
+            content_bytes = gzip.decompress(mock_client.post.call_args[1]["content"])
             lines = [
                 line.strip() for line in content_bytes.decode("utf-8").split("\n") if line.strip()
             ]
@@ -469,7 +472,8 @@ class TestVictoriaLogsBackend:
             mock_client.post.assert_called_once()
 
             # 验证：即使 prompt <= chunk_size，也因为总大小超限而强制分块
-            content_bytes = mock_client.post.call_args[1]["content"]
+            assert mock_client.post.call_args[1]["headers"]["Content-Encoding"] == "gzip"
+            content_bytes = gzip.decompress(mock_client.post.call_args[1]["content"])
             lines = [
                 line.strip() for line in content_bytes.decode("utf-8").split("\n") if line.strip()
             ]
@@ -498,3 +502,36 @@ class TestVictoriaLogsBackend:
 
             result = await backend.health_check()
             assert result is False
+
+    @pytest.mark.asyncio
+    async def test_read_payload_truncated_shards_resilience(self, backend: VictoriaLogsBackend):
+        """分片缺失导致 JSON 不完整时的容错降级测试，防止整体返回空字典."""
+        # 模拟仅返回了前截断的残缺 prompt_chunk（未闭合的 JSON）
+        incomplete_json = '{"model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "incomplete data...'
+        shard_doc = {
+            "_time": "2026-09-18T16:53:53.000Z",
+            "request_id": "truncated-req-123",
+            "model": "gemini-3.8-flash",
+            "shard_index": 1,
+            "total_shards": 5,
+            "prompt_chunk": incomplete_json,
+            "response": '{"reply": "completed response"}',
+        }
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = json.dumps(shard_doc) + "\n"
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            prompt, response = await backend.read_payload(request_id="truncated-req-123")
+
+            # 即使 prompt JSON 不完整，response 依然被正确解析提取
+            assert response == {"reply": "completed response"}
+            # prompt 没有崩掉返回空，而是提取了已有的关键信息和提示
+            assert "user_prompt" in prompt
+            assert "incomplete data" in prompt["user_prompt"]
+            assert prompt["model"] == "gemini-3.8-flash"
