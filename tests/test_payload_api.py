@@ -166,3 +166,24 @@ class TestPayloadAPI:
         data = response.json()
         assert data["prompt"]["user_prompt"] == "string payload"
         assert data["response"]["reply"] == "string reply"
+
+    def test_get_request_payload_redis_cache_hit(self, client, mock_backend):
+        """验证命中 Redis L2 缓存时直接直出，不调用后端 read_payload."""
+        from unittest.mock import AsyncMock, patch
+
+        cached_data = json.dumps({
+            "prompt": {"user_prompt": "cached from redis"},
+            "response": {"reply": "instant reply from redis"},
+        })
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=cached_data)
+
+        with patch("app.api.payload.get_redis_client", return_value=mock_redis):
+            response = client.get("/api/v1/logs/cached-req-777/payload?date=2026-09-06")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["prompt"]["user_prompt"] == "cached from redis"
+        assert data["response"]["reply"] == "instant reply from redis"
+        mock_redis.get.assert_called_once_with("litellm:payload:cached-req-777")
