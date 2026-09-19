@@ -247,3 +247,33 @@ class TestPayloadAPI:
         assert len(prompt["messages"]) == 2
         assert prompt["messages"][1]["content"] == huge_content
         assert prompt["user_prompt"] == huge_content
+
+    def test_get_request_payload_multimodal_base64_image_truncation(self, client, mock_backend):
+        """验证多模态超大 Base64 图片 (image_url) 在秒开模式下被智能安全折叠."""
+        huge_base64 = "data:image/png;base64," + ("iVBORw0KGgoAAAANSUhEUgAA" * 1000)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "请看这张截图："},
+                    {"type": "image_url", "image_url": {"url": huge_base64}},
+                ],
+            }
+        ]
+        mock_backend.read_result = (
+            {"user_prompt": "请看这张截图", "messages": messages},
+            {"reply": "收到图片"},
+        )
+
+        response = client.get("/api/v1/logs/img-msg-001/payload?date=2026-09-06")
+        assert response.status_code == 200
+        data = response.json()
+
+        prompt = data["prompt"]
+        assert prompt["is_truncated"] is True
+        user_msg = prompt["messages"][0]
+        assert isinstance(user_msg["content"], list)
+        img_item = user_msg["content"][1]
+        img_url = img_item["image_url"]["url"]
+        assert len(img_url) < len(huge_base64)
+        assert "Base64 图片数据" in img_url
