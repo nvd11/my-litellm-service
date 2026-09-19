@@ -176,6 +176,9 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
         .map((item) => {
           if (typeof item === "string") return item;
           if (item && typeof item === "object") {
+            if (item.type === "image_url" && item.image_url?.url) {
+              return `🖼️ [图片] ${item.image_url.url}`;
+            }
             return item.text || item.content || JSON.stringify(item);
           }
           return String(item);

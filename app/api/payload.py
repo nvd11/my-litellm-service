@@ -46,27 +46,56 @@ def _truncate_text_safely(
 
 
 def _truncate_content_recursively(content: Any) -> tuple[Any, bool]:
-    """递归检查并安全截断超长字符串或多模态结构中的大文本."""
+    """递归检查并安全截断超长字符串、Base64 图片或多模态结构中的大文本."""
     if isinstance(content, str):
         return _truncate_text_safely(content)
+
+    if isinstance(content, dict):
+        new_dict: dict[str, Any] = {}
+        any_truncated = False
+        for k, v in content.items():
+            if k == "image_url":
+                # 专门处理多模态图片 Base64 膨胀 (单张可达数兆字符)
+                if isinstance(v, dict) and "url" in v and isinstance(v["url"], str):
+                    url_val = v["url"]
+                    if len(url_val) > 500 or url_val.startswith("data:image"):
+                        any_truncated = True
+                        new_dict[k] = {
+                            "url": (
+                                f"{url_val[:60]}... "
+                                f"（此处已自动智能折叠 Base64 图片数据 {len(url_val):,} 字符；"
+                                "点击下方「加载全量完整报文」可获取全部内容）"
+                            )
+                        }
+                    else:
+                        new_dict[k] = v
+                elif isinstance(v, str) and (len(v) > 500 or v.startswith("data:image")):
+                    any_truncated = True
+                    new_dict[k] = (
+                        f"{v[:60]}... "
+                        f"（此处已自动智能折叠 Base64 图片数据 {len(v):,} 字符；"
+                        "点击下方「加载全量完整报文」可获取全部内容）"
+                    )
+                else:
+                    new_dict[k] = v
+            elif isinstance(v, (dict, list, str)):
+                new_v, tr = _truncate_content_recursively(v)
+                if tr:
+                    any_truncated = True
+                new_dict[k] = new_v
+            else:
+                new_dict[k] = v
+        return new_dict, any_truncated
 
     if isinstance(content, list):
         truncated_list: list[Any] = []
         any_truncated = False
         for item in content:
-            if isinstance(item, dict):
-                new_dict = dict(item)
-                if "text" in new_dict and isinstance(new_dict["text"], str):
-                    new_text, tr = _truncate_text_safely(new_dict["text"])
-                    if tr:
-                        any_truncated = True
-                    new_dict["text"] = new_text
-                truncated_list.append(new_dict)
-            elif isinstance(item, str):
-                new_text, tr = _truncate_text_safely(item)
+            if isinstance(item, (dict, list, str)):
+                new_item, tr = _truncate_content_recursively(item)
                 if tr:
                     any_truncated = True
-                truncated_list.append(new_text)
+                truncated_list.append(new_item)
             else:
                 truncated_list.append(item)
         return truncated_list, any_truncated
