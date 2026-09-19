@@ -675,10 +675,23 @@ def _mount_observability_on_proxy() -> None:
 
         import litellm.proxy._types as pt
         import litellm.proxy.proxy_server as ps
+        from fastapi.middleware.gzip import GZipMiddleware
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
 
         from app.api import api_router
+
+        # 0. 注入 GZip 响应压缩中间件 (>=1000 字节自动压缩)，大幅削减跨国长肥网络大报文传输开销
+        try:
+            has_gzip = any(
+                getattr(m, "cls", None) is GZipMiddleware
+                for m in getattr(ps.app, "user_middleware", [])
+            )
+            if not has_gzip:
+                ps.app.add_middleware(GZipMiddleware, minimum_size=1000)
+                logger.debug("Successfully added GZipMiddleware to LiteLLM proxy app")
+        except Exception as gzip_err:
+            logger.debug("Failed to attach GZipMiddleware to LiteLLM app: %s", gzip_err)
 
         # 1. 动态注册免鉴权路由白名单 (外部受 Kong + Logto SSO 保护)
         public_set = set(pt.LiteLLMRoutes.public_routes.value)
