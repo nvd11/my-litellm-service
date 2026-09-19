@@ -18,6 +18,61 @@ from app.db import get_async_engine, llm_request_logs
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Payloads"])
 
+MAX_SINGLE_MESSAGE_CHARS: int = 5000
+TRUNCATE_HEAD_CHARS: int = 2500
+TRUNCATE_TAIL_CHARS: int = 1500
+
+
+def _truncate_text_safely(
+    text_val: str,
+    max_chars: int = MAX_SINGLE_MESSAGE_CHARS,
+    head_chars: int = TRUNCATE_HEAD_CHARS,
+    tail_chars: int = TRUNCATE_TAIL_CHARS,
+) -> tuple[str, bool]:
+    """若单段文本超过字数上限，保留首尾关键上下文并注入明确的智能抽样折叠提示."""
+    if len(text_val) <= max_chars:
+        return text_val, False
+
+    total_len = len(text_val)
+    omitted_chars = total_len - head_chars - tail_chars
+    truncated = (
+        f"{text_val[:head_chars]}\n\n"
+        f"（... 此处已自动智能抽样截断 {omitted_chars:,} 字符，"
+        f"该消息单段总长 {total_len:,} 字符；"
+        "点击下方「加载全量完整报文」可获取全部未截断内容 ...）\n\n"
+        f"{text_val[-tail_chars:]}"
+    )
+    return truncated, True
+
+
+def _truncate_content_recursively(content: Any) -> tuple[Any, bool]:
+    """递归检查并安全截断超长字符串或多模态结构中的大文本."""
+    if isinstance(content, str):
+        return _truncate_text_safely(content)
+
+    if isinstance(content, list):
+        truncated_list: list[Any] = []
+        any_truncated = False
+        for item in content:
+            if isinstance(item, dict):
+                new_dict = dict(item)
+                if "text" in new_dict and isinstance(new_dict["text"], str):
+                    new_text, tr = _truncate_text_safely(new_dict["text"])
+                    if tr:
+                        any_truncated = True
+                    new_dict["text"] = new_text
+                truncated_list.append(new_dict)
+            elif isinstance(item, str):
+                new_text, tr = _truncate_text_safely(item)
+                if tr:
+                    any_truncated = True
+                truncated_list.append(new_text)
+            else:
+                truncated_list.append(item)
+        return truncated_list, any_truncated
+
+    return content, False
+
 
 class PayloadInspectionResponse(BaseModel):
     """Structured inspection data for a single LLM request."""
@@ -126,20 +181,53 @@ async def get_request_payload(
     prompt_url = f"{base_url}/{prefix}/prompt.json"
     response_url = f"{base_url}/{prefix}/response.json"
 
-    # 5. 对超长多轮对话 (>30 条消息) 做智能轻量化抽样
-    messages = prompt_data.get("messages")
-    if isinstance(messages, list) and len(messages) > 30 and not full:
-        total_count = len(messages)
-        prompt_data["total_messages_count"] = total_count
-        prompt_data["is_truncated"] = True
-        notice_msg = {
-            "role": "system",
-            "content": (
-                f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，"
-                "点击下方「加载全部消息」可获取全量上下文 ...）"
-            ),
-        }
-        prompt_data["messages"] = messages[:5] + [notice_msg] + messages[-20:]
+    # 5. 对超长多轮对话 (>30 条消息) 或单条巨型消息做智能轻量化抽样 (full=False 时触发)
+    if not full and isinstance(prompt_data, dict):
+        messages = prompt_data.get("messages")
+        has_truncation = False
+
+        if isinstance(messages, list):
+            total_count = len(messages)
+
+            # A. 多轮条数抽样：>30 条时保留前 5 条与后 20 条
+            if total_count > 30:
+                has_truncation = True
+                prompt_data["total_messages_count"] = total_count
+                notice_msg = {
+                    "role": "system",
+                    "content": (
+                        f"（... 中间已自动智能折叠 {total_count - 25} 条历史问答，"
+                        "点击下方「加载全量完整报文」可获取全量上下文 ...）"
+                    ),
+                }
+                messages = messages[:5] + [notice_msg] + messages[-20:]
+
+            # B. 单条消息字符保护：防止前 5 条或后 20 条中混有数兆字符的超大 Prompt / Tool 日志
+            safe_messages: list[dict[str, Any]] = []
+            for msg in messages:
+                if isinstance(msg, dict) and "content" in msg:
+                    new_msg = dict(msg)
+                    truncated_c, tr = _truncate_content_recursively(msg["content"])
+                    if tr:
+                        has_truncation = True
+                    new_msg["content"] = truncated_c
+                    safe_messages.append(new_msg)
+                else:
+                    safe_messages.append(msg)
+
+            prompt_data["messages"] = safe_messages
+
+            if has_truncation:
+                prompt_data["is_truncated"] = True
+                if "total_messages_count" not in prompt_data:
+                    prompt_data["total_messages_count"] = total_count
+
+        # C. 对顶层 user_prompt 卡片同样执行字数保护
+        if "user_prompt" in prompt_data and isinstance(prompt_data["user_prompt"], str):
+            truncated_up, tr = _truncate_text_safely(prompt_data["user_prompt"])
+            if tr:
+                prompt_data["user_prompt"] = truncated_up
+                prompt_data["is_truncated"] = True
 
     return PayloadInspectionResponse(
         request_id=request_id,

@@ -705,8 +705,11 @@ export const PayloadDrawer: React.FC<PayloadDrawerProps> = ({ log, onClose }) =>
                             className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-center font-medium transition-all disabled:opacity-50"
                           >
                             {loadingFull
-                              ? "正在从存储引擎传输千条全量报文..."
-                              : `⚡ 当前为秒开精简预览，点击加载完整全部 ${(payloadData?.prompt as any)?.total_messages_count} 条历史消息`}
+                              ? "正在从存储引擎传输全量完整报文..."
+                              : (payloadData?.prompt as any)?.total_messages_count &&
+                                (payloadData?.prompt as any)?.total_messages_count > (payloadData?.prompt?.messages?.length || 0)
+                              ? `⚡ 当前为秒开精简预览，点击加载完整全部 ${(payloadData?.prompt as any)?.total_messages_count} 条历史消息与大文本`
+                              : "⚡ 当前已开启轻量秒开预览（含长文本抽样），点击加载全量完整报文"}
                           </button>
                         </div>
                       )}

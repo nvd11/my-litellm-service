@@ -39,13 +39,20 @@ class TestPayloadAPI:
     @pytest.fixture
     def client(self, mock_backend):
         """测试客户端."""
+        from unittest.mock import AsyncMock, patch
+
         from app.main import app
 
         # 覆盖依赖注入
         app.dependency_overrides[get_payload_backend] = lambda: mock_backend
 
-        with TestClient(app) as client:
-            yield client
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.set = AsyncMock(return_value=True)
+
+        with patch("app.api.payload.get_redis_client", return_value=mock_redis):
+            with TestClient(app) as client:
+                yield client
 
         app.dependency_overrides.clear()
 
@@ -187,3 +194,56 @@ class TestPayloadAPI:
         assert data["prompt"]["user_prompt"] == "cached from redis"
         assert data["response"]["reply"] == "instant reply from redis"
         mock_redis.get.assert_called_once_with("litellm:payload:cached-req-777")
+
+    def test_get_request_payload_single_oversized_message_truncation(self, client, mock_backend):
+        """单条超长消息 (>5000 字符) 智能抽样截断测试."""
+        huge_content = "A" * 20000
+        messages = [
+            {"role": "system", "content": "system instruction"},
+            {"role": "user", "content": huge_content},
+            {"role": "assistant", "content": "normal response"},
+        ]
+        mock_backend.read_result = (
+            {"user_prompt": huge_content, "messages": messages},
+            {"reply": "test"},
+        )
+
+        response = client.get("/api/v1/logs/huge-msg-123/payload?date=2026-09-06")
+        assert response.status_code == 200
+        data = response.json()
+
+        prompt = data["prompt"]
+        assert prompt["is_truncated"] is True
+        assert prompt["total_messages_count"] == 3
+        assert len(prompt["messages"]) == 3
+
+        user_msg = prompt["messages"][1]
+        assert len(user_msg["content"]) < len(huge_content)
+        assert "此处已自动智能抽样截断" in user_msg["content"]
+        assert "20,000" in user_msg["content"]
+
+        # 检查顶层 user_prompt 也被安全保护
+        assert len(prompt["user_prompt"]) < len(huge_content)
+        assert "此处已自动智能抽样截断" in prompt["user_prompt"]
+
+    def test_get_request_payload_single_oversized_message_full(self, client, mock_backend):
+        """带 full=true 时单条超长消息保持全量未截断."""
+        huge_content = "A" * 20000
+        messages = [
+            {"role": "system", "content": "system instruction"},
+            {"role": "user", "content": huge_content},
+        ]
+        mock_backend.read_result = (
+            {"user_prompt": huge_content, "messages": messages},
+            {"reply": "test"},
+        )
+
+        response = client.get("/api/v1/logs/huge-msg-123/payload?date=2026-09-06&full=true")
+        assert response.status_code == 200
+        data = response.json()
+
+        prompt = data["prompt"]
+        assert "is_truncated" not in prompt
+        assert len(prompt["messages"]) == 2
+        assert prompt["messages"][1]["content"] == huge_content
+        assert prompt["user_prompt"] == huge_content
