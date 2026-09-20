@@ -1,5 +1,7 @@
 """LiteLLM Payload Direct Proxy & Inspection API Module."""
 
+import base64
+import gzip
 import json
 import logging
 from datetime import UTC, date, datetime
@@ -12,6 +14,7 @@ from sqlalchemy import select
 from app.core.backends.factory import get_payload_backend
 from app.core.config import Settings, get_settings
 from app.core.payload_backend import PayloadBackend
+from app.core.payload_uploader import _fold_base64_for_cache
 from app.core.redis_client import get_redis_client
 from app.db import get_async_engine, llm_request_logs
 
@@ -133,12 +136,16 @@ async def get_request_payload(
     cached_prompt: dict[str, Any] | None = None
     cached_response: dict[str, Any] | None = None
 
-    # 方案 1: 优先从 Redis L2 缓存中检索不可变 Payload (<1ms 极速直出)
+    # 方案 1: 优先从 Redis L2 缓存中检索不可变 Payload (<1ms 极速直出，兼容 Gzip 压缩与历史明文)
     try:
         redis = get_redis_client(settings)
         cached_raw = await redis.get(cache_key)
         if cached_raw:
-            cached_obj = json.loads(cached_raw)
+            if cached_raw.startswith("H4sI"):
+                decompressed_str = gzip.decompress(base64.b64decode(cached_raw)).decode("utf-8")
+                cached_obj = json.loads(decompressed_str)
+            else:
+                cached_obj = json.loads(cached_raw)
             if isinstance(cached_obj, dict):
                 cached_prompt = cached_obj.get("prompt")
                 cached_response = cached_obj.get("response")
@@ -191,16 +198,24 @@ async def get_request_payload(
             except Exception:
                 response_data = {"reply": response_data}
 
-        # 方案 1: 查得结果后，回填至 Redis L2 缓存 (TTL: 3天)
+        # 方案 1 & 4: 查得结果后，折叠超大图片并以 Gzip Level 1 压缩回填至 Redis L2 缓存 (TTL: 3天)
         if prompt_data or response_data:
             try:
                 redis = get_redis_client(settings)
+                cache_prompt = _fold_base64_for_cache(prompt_data)
+                cache_response = _fold_base64_for_cache(response_data)
+                raw_json = json.dumps(
+                    {"prompt": cache_prompt, "response": cache_response},
+                    ensure_ascii=False,
+                )
+                compressed_bytes = gzip.compress(raw_json.encode("utf-8"), compresslevel=1)
+                cached_val = base64.b64encode(compressed_bytes).decode("ascii")
                 await redis.set(
                     cache_key,
-                    json.dumps({"prompt": prompt_data, "response": response_data}, ensure_ascii=False),
+                    cached_val,
                     ex=86400 * 3,
                 )
-                logger.debug("Populated Redis payload cache for %s", request_id)
+                logger.debug("Populated compressed Redis payload cache for %s", request_id)
             except Exception as cache_err:
                 logger.debug("Could not populate Redis payload cache for %s: %s", request_id, cache_err)
 

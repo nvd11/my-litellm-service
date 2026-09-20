@@ -201,11 +201,58 @@ async def test_async_upload_payload_redis_write_through(test_settings: Settings)
             backend=mock_backend,
         )
 
-    # 验证 redis.set 在落盘前已被即时调用，且 TTL 为 3 天 (259200 秒)
+    # 验证 redis.set 在落盘前已被即时调用，且经过 Gzip Level 1 极速压缩与 Base64 编码，TTL 为 3 天
     mock_redis.set.assert_called_once()
     args, kwargs = mock_redis.set.call_args
     assert args[0] == "litellm:payload:req-new-3days-ttl"
-    data = json.loads(args[1])
+    # Gzip 压缩后的 Base64 字符串以 H4sI 开头
+    assert isinstance(args[1], str)
+    assert args[1].startswith("H4sI")
+
+    import base64
+    import gzip
+    decompressed = gzip.decompress(base64.b64decode(args[1])).decode("utf-8")
+    data = json.loads(decompressed)
     assert data["prompt"]["user_prompt"] == "hello"
     assert data["response"]["reply"] == "world"
     assert kwargs["ex"] == 86400 * 3
+
+
+@pytest.mark.asyncio
+async def test_async_upload_payload_folds_base64_in_redis_cache(test_settings: Settings) -> None:
+    """验证写入 Redis 缓存时，超大 Base64 图片被折叠以防污染缓存，而冷存储保留全量."""
+    import base64
+    import gzip
+    import json
+    mock_redis = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.write_payload = AsyncMock(return_value=True)
+
+    huge_img = "data:image/png;base64," + ("ABCD" * 1000)
+    messages = [
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": huge_img}}]}
+    ]
+
+    with patch("app.core.payload_uploader.get_redis_client", return_value=mock_redis):
+        await async_upload_payload(
+            request_id="req-fold-img-test",
+            kwargs={"model": "gemini-3.8-flash", "messages": messages},
+            response_obj={"choices": [{"message": {"content": "see image"}}]},
+            settings=test_settings,
+            backend=mock_backend,
+        )
+
+    # 1. 验证写入 Redis 的内容中图片已被折叠
+    mock_redis.set.assert_called_once()
+    args, _ = mock_redis.set.call_args
+    decompressed = gzip.decompress(base64.b64decode(args[1])).decode("utf-8")
+    cached_data = json.loads(decompressed)
+    cached_img_url = cached_data["prompt"]["messages"][0]["content"][0]["image_url"]["url"]
+    assert len(cached_img_url) < len(huge_img)
+    assert "Base64 image folded for L2 cache" in cached_img_url
+
+    # 2. 验证冷存储 write_payload 接收到的仍是完整未折叠数据
+    mock_backend.write_payload.assert_called_once()
+    call_kwargs = mock_backend.write_payload.call_args[1]
+    backend_img_url = call_kwargs["prompt"]["messages"][0]["content"][0]["image_url"]["url"]
+    assert backend_img_url == huge_img
