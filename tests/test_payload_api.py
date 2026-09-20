@@ -195,6 +195,31 @@ class TestPayloadAPI:
         assert data["response"]["reply"] == "instant reply from redis"
         mock_redis.get.assert_called_once_with("litellm:payload:cached-req-777")
 
+    def test_get_request_payload_redis_gzip_cache_hit(self, client, mock_backend):
+        """验证命中 Gzip Level 1 压缩 + Base64 编码的 Redis L2 缓存时无缝极速解压直出."""
+        import base64
+        import gzip
+        from unittest.mock import AsyncMock, patch
+
+        cached_dict = {
+            "prompt": {"user_prompt": "cached and gzipped from redis"},
+            "response": {"reply": "instant decompressed reply"},
+        }
+        compressed_bytes = gzip.compress(json.dumps(cached_dict).encode("utf-8"), compresslevel=1)
+        b64_cached_str = base64.b64encode(compressed_bytes).decode("ascii")
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b64_cached_str)
+
+        with patch("app.api.payload.get_redis_client", return_value=mock_redis):
+            response = client.get("/api/v1/logs/gzip-req-888/payload?date=2026-09-06")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["prompt"]["user_prompt"] == "cached and gzipped from redis"
+        assert data["response"]["reply"] == "instant decompressed reply"
+        mock_redis.get.assert_called_once_with("litellm:payload:gzip-req-888")
+
     def test_get_request_payload_single_oversized_message_truncation(self, client, mock_backend):
         """单条超长消息 (>5000 字符) 智能抽样截断测试."""
         huge_content = "A" * 20000
