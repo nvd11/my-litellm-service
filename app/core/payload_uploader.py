@@ -221,7 +221,7 @@ async def async_upload_payload(
             "spend": 0.0,
         }
 
-        # 方案 1: 优先瞬间写穿 (Pre-populate) 到本地 Redis L2 缓存 (TTL: 7天)
+        # 方案 1: 优先瞬间写穿 (Pre-populate) 到本地 Redis L2 缓存 (TTL: 3天)
         # 耗时仅 <1ms！确保前端看板在模型刚结束哪怕 1 毫秒后点击，也能 100% 从 Redis 命中，彻底消灭远端网络写入未完成导致的竞态！
         try:
             redis = get_redis_client(resolved_settings)
@@ -230,7 +230,7 @@ async def async_upload_payload(
                 {"prompt": prompt_dict, "response": response_dict},
                 ensure_ascii=False,
             )
-            await redis.set(cache_key, cached_val, ex=86400 * 7)
+            await redis.set(cache_key, cached_val, ex=86400 * 3)
             logger.debug("Successfully pre-populated Redis L2 payload cache for %s", request_id)
         except Exception as cache_err:
             logger.warning("Could not pre-populate Redis L2 payload cache for %s: %s", request_id, cache_err)
