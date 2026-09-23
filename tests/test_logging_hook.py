@@ -586,3 +586,40 @@ async def test_async_pre_call_deployment_hook_sanitization():
     assert '"$ref"' not in msgs[1]["content"]
     assert '"_ref"' in msgs[2]["content"]
     assert '"$ref"' not in msgs[2]["content"]
+
+
+@pytest.mark.asyncio
+async def test_async_pre_call_deployment_hook_pop_empty_api_key():
+    """验证当 kwargs 中的 api_key 为 None 或空字符串时，主动踢除以防覆盖真实 Key."""
+    logger = DBLoggingLogger()
+
+    # 1. api_key 为 None 时被踢除
+    kwargs_none = {"api_key": None, "model": "gemini-3.8-flash"}
+    res_none = await logger.async_pre_call_deployment_hook(kwargs_none, None)
+    assert "api_key" not in res_none
+
+    # 2. api_key 为空字符串时被踢除
+    kwargs_empty = {"api_key": "", "model": "gemini-3.8-flash"}
+    res_empty = await logger.async_pre_call_deployment_hook(kwargs_empty, None)
+    assert "api_key" not in res_empty
+
+    # 3. api_key 为真实有效值时保留
+    kwargs_valid = {"api_key": "valid-key-123", "model": "gemini-3.8-flash"}
+    res_valid = await logger.async_pre_call_deployment_hook(kwargs_valid, None)
+    assert res_valid.get("api_key") == "valid-key-123"
+
+
+def test_setup_runtime_gemini_aliases(monkeypatch):
+    """验证内存中自动建立 GEMINI_API_KEY 与 GOOGLE_API_KEY 别名对齐."""
+    import os
+
+    monkeypatch.setenv("OPENAI_API_KEY_FREE_3", "AIzaSyTestKey123")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    from app.core.logging_hook import _setup_runtime_gemini_aliases
+
+    _setup_runtime_gemini_aliases()
+
+    assert os.environ.get("GEMINI_API_KEY") == "AIzaSyTestKey123"
+    assert os.environ.get("GOOGLE_API_KEY") == "AIzaSyTestKey123"

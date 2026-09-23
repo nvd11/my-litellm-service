@@ -48,6 +48,29 @@ from app.db import get_async_engine, llm_request_logs
 logger = logging.getLogger(__name__)
 
 
+def _setup_runtime_gemini_aliases() -> None:
+    """自动将已有的 OPENAI_API_KEY_FREE_* 在 Python 进程内存中对齐到 GEMINI/GOOGLE_API_KEY，
+    防止 LiteLLM 底层代码在特定 fallback 分支探测全局环境变量时漏空，
+    完全保持外部 config.yaml 与 GitOps 清单统一规范无混淆。
+    """
+    import os
+
+    for key_name in (
+        "OPENAI_API_KEY_FREE_3",
+        "OPENAI_API_KEY_FREE_1",
+        "OPENAI_API_KEY_FREE_2",
+        "OPENAI_API_KEY_PRO_PLAN",
+    ):
+        val = os.environ.get(key_name)
+        if val:
+            os.environ.setdefault("GEMINI_API_KEY", val)
+            os.environ.setdefault("GOOGLE_API_KEY", val)
+            break
+
+
+_setup_runtime_gemini_aliases()
+
+
 def _calculate_latency_ms(
     start_time: Any,
     end_time: Any,
@@ -637,25 +660,33 @@ class DBLoggingLogger(CustomLogger):
     async def async_pre_call_deployment_hook(
         self, kwargs: dict[str, Any], call_type: Any | None
     ) -> dict[str, Any] | None:
-        """在请求派发给底层模型前进行报文净化 (Pre-call deployment hook).
+        """在请求派发给底层模型前进行报文净化与参数保护 (Pre-call deployment hook).
 
-        修复 Google Gemini 官方特有缺陷：
-        当工具执行结果 (role='tool') 中包含 JSON Schema 的引用关键字 `"$ref"` 时，
-        Google Gemini 后端反序列化器会将其误判为 Function Calling 内部的 Schema 引用，
-        进而抛出 400 异常：
-        `The referenced name ... in function_response.response does not match to a display_name in the function_response.parts.`
-        在此处将 `"$ref"` 安全替换为 `"_ref"`，彻底免疫 Google Gemini 后端的反序列化崩溃。
+        核心防护逻辑:
+        1. 防御 LiteLLM 字典解构覆盖陷阱 (input_kwargs = {**litellm_params, **kwargs}):
+           当请求上下文中的 kwargs["api_key"] 为 None 或空字符串时，必须主动剔除，
+           彻底阻止其将 deployment 中由 config.yaml 解析出的真实 api_key 覆盖为 None！
+        2. 修复 Google Gemini 官方反序列化缺陷：
+           当工具执行结果 (role='tool') 中包含 JSON Schema 的引用关键字 `"$ref"` 时，
+           Google Gemini 后端反序列化器会将其误判为 Function Calling 内部的 Schema 引用并抛出 400 异常。
+           在此处将 `"$ref"` 安全替换为 `"_ref"`，彻底免疫 Google Gemini 后端的反序列化崩溃。
         """
         try:
+            # 防御字典合并踩踏：若请求上下文中的 api_key 为 None 或空，剔除之
+            if "api_key" in kwargs and not kwargs["api_key"]:
+                kwargs.pop("api_key", None)
+
             messages = kwargs.get("messages")
             if isinstance(messages, list):
                 for msg in messages:
                     if isinstance(msg, dict) and msg.get("role") in ("tool", "function"):
                         content = msg.get("content")
                         if isinstance(content, str) and ('"$ref"' in content or '"\\$ref"' in content):
-                            msg["content"] = content.replace('"\\$ref"', '"_ref"').replace('"$ref"', '"_ref"')
+                            msg["content"] = (
+                                content.replace('"\\$ref"', '"_ref"').replace('"$ref"', '"_ref"')
+                            )
         except Exception as e:
-            logger.warning("Error in async_pre_call_deployment_hook sanitizing tool messages: %s", e)
+            logger.warning("Error in async_pre_call_deployment_hook: %s", e)
         return kwargs
 
 
