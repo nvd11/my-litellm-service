@@ -2,7 +2,7 @@
 # LiteLLM Proxy Model & Multi-Tier Routing Configuration
 # ==============================================================================
 # Key 角色与健康度说明：
-# - OPENAI_API_KEY_FREE_3  : 主力健康老号 (Google 免费层 15 RPM) - Tier 1 唯一主力 (完美支持 Responses API)
+# - OPENAI_API_KEY_FREE_3  : 主力健康老号 (Google 商业/公司 Key，无 15 RPM 限制) - Tier 1 唯一主力 (完美支持 Responses API)
 # - A6_API_KEY             : A6 API LLM 中转站 (高可用无限并发) - Tier 2 独立应急保底
 # - META_API_KEY           : 元衡 API (cn.meta-api.vip 优质组) - gpt-5.6-luna 独立通道, 与 A6 互为 fallback
 # ==============================================================================
@@ -17,7 +17,6 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY_FREE_3
       input_cost_per_token: 0.00000075
       output_cost_per_token: 0.00000375
-      rpm: 15
       metadata:
         provider: "google-gemini"
         provider_key_alias: "OPENAI_API_KEY_FREE_3"
@@ -34,7 +33,6 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY_FREE_3
       input_cost_per_token: 0.00000075
       output_cost_per_token: 0.00000375
-      rpm: 15
       metadata:
         provider: "google-gemini"
         provider_key_alias: "OPENAI_API_KEY_FREE_3"
