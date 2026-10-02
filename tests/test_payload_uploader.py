@@ -256,3 +256,35 @@ async def test_async_upload_payload_folds_base64_in_redis_cache(test_settings: S
     call_kwargs = mock_backend.write_payload.call_args[1]
     backend_img_url = call_kwargs["prompt"]["messages"][0]["content"][0]["image_url"]["url"]
     assert backend_img_url == huge_img
+
+
+@pytest.mark.asyncio
+async def test_async_upload_payload_folds_embedded_base64_in_string(test_settings: Settings) -> None:
+    """验证包含在普通字符串中间的超大嵌入式 Base64 图片同样被严格折叠."""
+    import base64
+    import gzip
+    import json
+    mock_redis = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.write_payload = AsyncMock(return_value=True)
+
+    huge_img = "data:image/png;base64," + ("ABCD" * 1000)
+    embedded_str = f"[Image 1] 为何都是exceptions?\n{{\"type\": \"image_url\", \"image_url\": {{\"url\": \"{huge_img}\"}}}}"
+    messages = [{"role": "user", "content": embedded_str}]
+
+    with patch("app.core.payload_uploader.get_redis_client", return_value=mock_redis):
+        await async_upload_payload(
+            request_id="req-embedded-b64-test",
+            kwargs={"model": "gemini-3.8-flash", "messages": messages},
+            response_obj={"choices": [{"message": {"content": "acknowledged"}}]},
+            settings=test_settings,
+            backend=mock_backend,
+        )
+
+    mock_redis.set.assert_called_once()
+    args, _ = mock_redis.set.call_args
+    decompressed = gzip.decompress(base64.b64decode(args[1])).decode("utf-8")
+    cached_data = json.loads(decompressed)
+    cached_user_prompt = cached_data["prompt"]["user_prompt"]
+    assert len(cached_user_prompt) < len(embedded_str)
+    assert "Base64 image folded for L2 cache" in cached_user_prompt

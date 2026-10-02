@@ -4,6 +4,7 @@ import base64
 import gzip
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -75,6 +76,8 @@ def _extract_text_content(content: Any) -> str:
                     parts.append(str(item["text"]))
                 elif "content" in item:
                     parts.append(_extract_text_content(item["content"]))
+                elif item.get("type") == "image_url" or "image_url" in item:
+                    parts.append("[image]")
                 else:
                     parts.append(str(item))
             else:
@@ -83,6 +86,8 @@ def _extract_text_content(content: Any) -> str:
     if isinstance(content, dict):
         if "text" in content:
             return str(content["text"])
+        if content.get("type") == "image_url" or "image_url" in content:
+            return "[image]"
         return str(content)
     return str(content)
 
@@ -94,8 +99,15 @@ def _fold_base64_for_cache(obj: Any) -> Any:
     in permanent cold storage (VictoriaLogs).
     """
     if isinstance(obj, str):
-        if len(obj) > 500 and (obj.startswith("data:image") or ";base64," in obj[:40]):
-            return f"{obj[:60]}... [Base64 image folded for L2 cache, total {len(obj):,} chars]"
+        if len(obj) > 500:
+            if obj.startswith("data:image") or ";base64," in obj[:40]:
+                return f"{obj[:60]}... [Base64 image folded for L2 cache, total {len(obj):,} chars]"
+            if "data:image/" in obj and ";base64," in obj:
+                def _sub_b64(m: re.Match[str]) -> str:
+                    matched_str = m.group(0)
+                    prefix = matched_str[:50]
+                    return f"{prefix}... [Base64 image folded for L2 cache, total {len(matched_str):,} chars]"
+                return re.sub(r"data:image/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=\s]{100,}", _sub_b64, obj)
         return obj
 
     if isinstance(obj, dict):
@@ -109,7 +121,7 @@ def _fold_base64_for_cache(obj: Any) -> Any:
             ):
                 url_str = v["url"]
                 if len(url_str) > 500 and (
-                    url_str.startswith("data:image") or ";base64," in url_str[:40]
+                    url_str.startswith("data:image") or ";base64," in url_str
                 ):
                     new_dict[k] = {
                         "url": (
@@ -119,6 +131,8 @@ def _fold_base64_for_cache(obj: Any) -> Any:
                     }
                 else:
                     new_dict[k] = v
+            elif k == "url" and isinstance(v, str) and len(v) > 500 and ("data:image" in v or ";base64," in v):
+                new_dict[k] = f"{v[:60]}... [Base64 image folded for L2 cache, total {len(v):,} chars]"
             else:
                 new_dict[k] = _fold_base64_for_cache(v)
         return new_dict
