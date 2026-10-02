@@ -204,7 +204,7 @@ router_settings:
   allowed_fails: 1
 
   # 🎯 禁闭冷却期 (秒)
-  cooldown_time: 60
+  cooldown_time: 5
 
   fallbacks:
     - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.8-backup"]
