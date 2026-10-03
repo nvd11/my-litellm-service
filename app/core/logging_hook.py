@@ -385,7 +385,12 @@ def _extract_provider_info(
     elif "gemini" in model_used.lower() or provider in ("gemini", "google"):
         provider = "google-gemini"
         if provider_key_alias == "unknown":
-            provider_key_alias = "OPENAI_API_KEY_FREE_3"
+            if "owner" in model_used.lower() or "free_1" in model_used.lower() or "free-1" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_1"
+            elif "alice" in model_used.lower() or "free_2" in model_used.lower() or "free-2" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_2"
+            else:
+                provider_key_alias = "OPENAI_API_KEY_FREE_3"
     elif "meta-api.vip" in api_base:
         provider = "meta-api.vip"
         if provider_key_alias == "unknown":
@@ -397,13 +402,23 @@ def _extract_provider_info(
     elif provider == "gemini":
         provider = "google-gemini"
         if provider_key_alias == "unknown":
-            provider_key_alias = "OPENAI_API_KEY_FREE_3"
+            if "owner" in model_used.lower() or "free_1" in model_used.lower() or "free-1" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_1"
+            elif "alice" in model_used.lower() or "free_2" in model_used.lower() or "free-2" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_2"
+            else:
+                provider_key_alias = "OPENAI_API_KEY_FREE_3"
 
     if provider_key_alias == "unknown":
         if provider == "a6api.com":
             provider_key_alias = "A6_API_KEY"
         elif provider == "google-gemini":
-            provider_key_alias = "OPENAI_API_KEY_FREE_3"
+            if "owner" in model_used.lower() or "free_1" in model_used.lower() or "free-1" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_1"
+            elif "alice" in model_used.lower() or "free_2" in model_used.lower() or "free-2" in model_used.lower():
+                provider_key_alias = "OPENAI_API_KEY_FREE_2"
+            else:
+                provider_key_alias = "OPENAI_API_KEY_FREE_3"
 
     return provider[:64], provider_key_alias[:64]
 

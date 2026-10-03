@@ -241,6 +241,18 @@ def test_extract_provider_info():
     assert p5 == "google-gemini"
     assert k5 == "OPENAI_API_KEY_FREE_3"
 
+    # 5.1 智能特征推导 (gemini-3.8-owner -> OPENAI_API_KEY_FREE_1)
+    kwargs_owner = {"model": "gemini-3.8-owner"}
+    p_o, k_o = _extract_provider_info(kwargs_owner, None)
+    assert p_o == "google-gemini"
+    assert k_o == "OPENAI_API_KEY_FREE_1"
+
+    # 5.2 智能特征推导 (gemini-3.8-alice -> OPENAI_API_KEY_FREE_2)
+    kwargs_alice = {"model": "gemini-3.8-alice"}
+    p_a, k_a = _extract_provider_info(kwargs_alice, None)
+    assert p_a == "google-gemini"
+    assert k_a == "OPENAI_API_KEY_FREE_2"
+
     # 6. 未知模型兜底
     p6, k6 = _extract_provider_info({}, None)
     assert p6 == "unknown"
