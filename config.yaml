@@ -3,7 +3,9 @@
 # ==============================================================================
 # Key 角色与健康度说明：
 # - OPENAI_API_KEY_FREE_3  : 主力健康老号 (Google 商业/公司 Key，无 15 RPM 限制) - Tier 1 唯一主力 (完美支持 Responses API)
-# - A6_API_KEY             : A6 API LLM 中转站 (高可用无限并发) - Tier 2 独立应急保底
+# - OPENAI_API_KEY_FREE_1  : 主人私人 Key (Google 官方，15 RPM) - Tier 2 首选保底
+# - OPENAI_API_KEY_FREE_2  : Alice Key (Google 官方，15 RPM) - Tier 3 次选保底
+# - A6_API_KEY             : A6 API LLM 中转站 (高可用无限并发) - 独立备用组 (不参与 Gemini 自动降级)
 # - META_API_KEY           : 元衡 API (cn.meta-api.vip 优质组) - gpt-5.6-luna 独立通道, 与 A6 互为 fallback
 # ==============================================================================
 # Secrets are resolved from environment variables and must not be committed.
@@ -41,6 +43,108 @@ model_list:
       output_cost_per_token: 0.00000375
       provider: "google-gemini"
       provider_key_alias: "OPENAI_API_KEY_FREE_3"
+
+  # === 🛡️ 官方保底降级组 (主人私人 Key 1 & Alice Key 2 - Google 原生通道，严防计费中转) ===
+  # Gemini 3.8 Flash - 主人私人 Key 1
+  - model_name: gemini-3.8-owner
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_1"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_1"
+
+  # Gemini 3.8 Flash - Alice Key 2
+  - model_name: gemini-3.8-alice
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_2
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_2"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_2"
+
+  # Gemini 3.8 Flash 命名别名 (Owner / Alice)
+  - model_name: gemini-3.8-flash-owner
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_1"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_1"
+
+  - model_name: gemini-3.8-flash-alice
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_2
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_2"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_2"
+
+  # Gemini 3.7 Flash - 主人私人 Key 1
+  - model_name: gemini-3.7-owner
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_1
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_1"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_1"
+
+  # Gemini 3.7 Flash - Alice Key 2
+  - model_name: gemini-3.7-alice
+    litellm_params:
+      model: gemini/gemini-3.7-flash
+      api_key: os.environ/OPENAI_API_KEY_FREE_2
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      rpm: 15
+      metadata:
+        provider: "google-gemini"
+        provider_key_alias: "OPENAI_API_KEY_FREE_2"
+    model_info:
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000375
+      provider: "google-gemini"
+      provider_key_alias: "OPENAI_API_KEY_FREE_2"
 
   # === 🛡️ 应急保底组 (A6 API 中转站 - 官方 5 折实收: $0.375/1M Input, $1.875/1M Output) ===
   # Gemini 3.8 Flash - A6 API Relay
@@ -207,8 +311,8 @@ router_settings:
   cooldown_time: 5
 
   fallbacks:
-    - gemini-3.8-flash: ["gemini-3.7-flash", "gemini-3.8-backup"]
-    - gemini-3.7-flash: ["gemini-3.8-backup"]
+    - gemini-3.8-flash: ["gemini-3.8-owner", "gemini-3.8-alice"]
+    - gemini-3.7-flash: ["gemini-3.7-owner", "gemini-3.7-alice"]
     - kimi-k3: ["glm-5.3", "gpt-5.6-luna-a6"]
     - glm-5.3: ["kimi-k3", "gpt-5.6-luna-a6"]
     - gpt-5.6-luna-a6: ["gpt-5.6-luna-yuanheng"]
