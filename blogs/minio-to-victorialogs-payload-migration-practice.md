@@ -1,5 +1,7 @@
 # 从 MinIO 到 VictoriaLogs：LiteLLM 8,000+ 生产长文本报文平稳迁移与架构演进实战
 
+> 注：文中涉及的账号 / 密码均已脱敏为占位符，示例不可直接用于生产。
+
 在企业级 LLM 网关架构中，冷热数据分离是支撑海量请求的核心设计：调用耗时、Token 计量、费用结算等**高频结构化指标**落入关系型数据库（如 OCI MySQL HeatWave）；而动辄数万 Token、甚至夹带多张高清图片 Base64 编码的**原始请求与回复报文（Prompt / Response Payload）**，最初被归档在本地对象存储（NUC 节点托管的 MinIO）。
 
 随着业务规模持续扩大，对象存储管理大量零碎小目录与文件（8,000+ 请求目录、16,000+ 个 JSON 文件）的弊端逐渐显现：元数据开销大、缺乏全文检索能力、备份迁移笨重。为此，我们将长文本报文全面迁移至专为日志与时序数据设计的时序日志引擎 —— **VictoriaLogs（部署在 Starfive RISC-V 节点）**。
@@ -54,7 +56,7 @@ MySQL `llm_request_logs` 已经对每次请求建立了完备的 B-Tree 索引�
 * **现象**：在尝试从 Starfive 连回 MySQL 查库时，`aiomysql` 频频报错：
   `MySQL error: 'cryptography' package is required for sha256_password or caching_sha2_password auth methods`
   而在 Starfive（RISC-V 架构）上使用 pip 安装 `cryptography` 时，因缺少预编译 Wheel，本地编译又缺乏 Rust 工具链，直接卡死。
-* **根因**：核查项目配置源头 `.env` 发现，生产 MySQL 账号为 `admin` / `REDACTED`，而临时脚本里手滑写成了默认的 `litellm` / `litellm_password`。因为用户不存在，MySQL 服务端回退去走 `caching_sha2_password` 握手流程，才误触发了 `cryptography` 缺失报错！
+* **根因**：核查项目配置源头 `.env` 发现，生产 MySQL 账号为 `admin` / `<REDACTED>`，而临时脚本里手滑写成了默认的 `litellm` / `litellm_password`。因为用户不存在，MySQL 服务端回退去走 `caching_sha2_password` 握手流程，才误触发了 `cryptography` 缺失报错！
 * **破局**：纠正账号密码后，原本通过 apt 预装的驱动立即正常建立连接。更重要的是，我们随后直接剥离了对 MySQL 的依赖，连数据库连接都直接省去。
 
 ---
